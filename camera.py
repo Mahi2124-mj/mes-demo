@@ -4,8 +4,9 @@ One ffmpeg process reads the camera's RTSP stream (default path
 /h264/ch1/main/av_stream, set on the Camera page) and writes two things at once:
   * 4-second MPEG-TS segments (stream copy, no re-encode) into <clips>/live/seg/
   * a 5 fps, 960 px wide JPEG stream on stdout for the live preview
-For every cycle the collector reports, the matching seconds are cut out of the
-segments (stream copy again) into <clips>/live/cycle_<seq>.mp4.
+For every cycle the collector reports, exactly that cycle (plus the optional
+pre/post roll) is cut out of the segments and re-encoded to H.264 into
+<clips>/live/cycle_<seq>.mp4, so the clip is as long as the cycle time.
 
 When recording is OFF, the preview still works: ffmpeg is started only while
 someone is watching.  Without ffmpeg installed, the preview falls back to the
@@ -30,7 +31,6 @@ SEGMENT_S = 4
 KEEP_SEGMENTS_S = 180       # segments are only needed until the cycle's clip is cut
 PREVIEW_IDLE_S = 20         # stop a preview-only ffmpeg this long after the last viewer leaves
 STALL_S = 15                # no frame for this long -> restart ffmpeg
-SEEK_MARGIN_S = 1.5         # stream-copy cuts begin on a keyframe; seek earlier so a clip never starts late
 LATENCY_S = 0.5             # an IP camera's picture reaches us about this long after the moment it shows
 SNAPSHOT_PATHS = ("/ISAPI/Streaming/channels/101/picture", "/cgi-bin/camera?resolution=640",
                   "/SnapshotJPEG?Resolution=640x480")
@@ -232,6 +232,9 @@ class Camera:
         out["rtsp_url"] = "demo test picture" if self.demo == "synthetic" else rtsp_url(self.get_cfg(), hide_password=True)
         out["demo"] = self.demo
         out["clips_dir"] = self.live_dir()
+        cfg = self.get_cfg()
+        pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
+        out["pre_post"] = f"{pre:g} s before / {post:g} s after" if pre or post else ""
         return out
 
     def add_viewer(self):
@@ -494,7 +497,7 @@ class Camera:
         # Segment times are arrival times, so look for the picture where it arrived.
         start += dt.timedelta(seconds=LATENCY_S)
         end += dt.timedelta(seconds=LATENCY_S)
-        seek = start - dt.timedelta(seconds=SEEK_MARGIN_S)
+        seek = start
         segs = self._segments()
         # segments that overlap [seek, end]: a segment runs until the next one starts
         use = []
@@ -514,18 +517,19 @@ class Camera:
         if run not in self.run_codec:
             self.run_codec[run] = self._codec_of(use[0][1])
             self._set(camera_codec=self.run_codec[run])
-        # Browsers play H.264 only: a camera sending H.265 (or anything else) gets its clips re-encoded.
-        if self.run_codec[run] in ("h264", None):
-            vcodec = ["-c", "copy"]
-        else:
-            vcodec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
-                      "-vf", "scale='min(1280,iw)':-2"]
+        # Re-encoded, not stream-copied: a copy can only start on a camera keyframe (1-4 s off), a
+        # re-encode starts on the exact frame, so the clip is exactly CT + pre/post roll long. It also
+        # turns H.265 cameras into H.264, the only codec every browser plays.
+        vcodec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-pix_fmt", "yuv420p",
+                  "-vf", "scale='min(1280,iw)':-2"]
         out_dir = self.live_dir()
         os.makedirs(out_dir, exist_ok=True)
         tmp = os.path.join(out_dir, f".cycle_{seq}.tmp.mp4")
+        # -ss after -i: decode from the first segment's start (a keyframe) and drop frames up to the
+        # cycle start. Seeking on the input instead lands on the next keyframe in MPEG-TS (late start).
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-               "-ss", f"{offset:.2f}", "-i", "concat:" + "|".join(n for _, n in use),
-               "-t", f"{dur:.2f}", "-map", "0:v:0", "-an", *vcodec, "-movflags", "+faststart", "-f", "mp4", tmp]
+               "-i", "concat:" + "|".join(n for _, n in use), "-ss", f"{offset:.3f}",
+               "-t", f"{dur:.3f}", "-map", "0:v:0", "-an", *vcodec, "-movflags", "+faststart", "-f", "mp4", tmp]
         r = subprocess.run(cmd, cwd=self.seg_dir(), stdin=subprocess.DEVNULL, capture_output=True,
                            timeout=120, creationflags=NO_WINDOW)
         if r.returncode != 0 or not os.path.isfile(tmp) or os.path.getsize(tmp) < 1024:

@@ -88,7 +88,7 @@ CAMERA_DEFAULTS = {
     "assigned_machine": "Nut-Runner Demo Station", "recording_enabled": True,
     "codec": "H.264 Main", "resolution": "1920 × 1080", "fps": 25, "bitrate_kbps": 2000,
     "iframe_interval": 25, "video_save_path": os.path.join(HERE, "clips"),
-    "retention_days": 30, "pre_roll_s": 2, "post_roll_s": 2,
+    "retention_days": 30, "pre_roll_s": 0, "post_roll_s": 0,     # 0/0: clip length = cycle time
 }
 
 

@@ -88,10 +88,11 @@ The server PC must be on the machine network (192.168.30.x).
 **Camera — `camera.py`** (settings: Camera page)
 - RTSP, default `rtsp://admin:<password>@192.168.30.20:554/h264/ch1/main/av_stream` (main stream).
   The password is entered on the Camera page (never shown again, never sent to the browser).
-  The stream must be **H.264** (browsers can't play H.265 clips).
+  H.264 or H.265 both work (clips are always saved as H.264).
 - One ffmpeg process keeps one RTSP session: it records 4 s segments (stream copy, no re-encode)
-  and feeds the live preview (5 fps JPEG). For each cycle the clip = cycle + pre/post roll is cut
-  from the segments into `clips/live/cycle_<seq>.mp4`; MANAGEMENT-2 plays it like the recorded clips.
+  and feeds the live preview (5 fps JPEG). For each cycle, exactly that cycle (+ pre/post roll, default
+  0 s) is cut frame-accurately and re-encoded to H.264 into `clips/live/cycle_<seq>.mp4`, so the clip
+  is as long as the cycle time; MANAGEMENT-2 plays it like the recorded clips.
 - Recording OFF: no clips; the preview opens the stream only while someone is watching.
 - Without ffmpeg: the preview falls back to the camera's HTTP snapshot (`/ISAPI/.../picture` or `/cgi-bin/camera`), no clips.
 - Live preview: Camera page → Preview → Live, or the 📷 CAMERA button on MANAGEMENT-2.

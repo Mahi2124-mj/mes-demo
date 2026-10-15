@@ -35,8 +35,8 @@ export const DEFAULTS = {
   iframe_interval: 25,
   video_save_path: "/home/server/mes-demo-5000/clips",
   retention_days: 30,
-  pre_roll_s: 2,
-  post_roll_s: 2,
+  pre_roll_s: 0,                            // 0/0: clip length = cycle time
+  post_roll_s: 0,
 };
 
 const MACHINES = ["Nut-Runner Demo Station"];
