@@ -1,0 +1,547 @@
+{
+ "id": 12,
+ "plant_id": 1,
+ "line_code": "YCA-L5",
+ "line_name": "YCA-SS",
+ "description": null,
+ "is_active": true,
+ "db_table_name": "yca_l5_dashboard",
+ "collector_status": "running",
+ "created_at": "2026-06-27T11:25:09.549434",
+ "updated_at": "2026-10-09T09:37:03.185224",
+ "zone_id": 1,
+ "ideal_cycle_time": 15.0,
+ "dashboard_plc_id": 48,
+ "active_shifts": "A,B",
+ "current_shift_row_id": 378,
+ "ot_active_shift": null,
+ "ot_start_a": null,
+ "ot_end_a": null,
+ "ot_start_b": null,
+ "ot_end_b": null,
+ "nf2_line_name": null,
+ "planned_takt_time": 15.0,
+ "energy_per_part": null,
+ "nf2_zone_name": null,
+ "peff_wc": "Q31S05",
+ "plant_name": "Toyota Boshoku Device",
+ "plant_code": "TBDI",
+ "plc_config": {
+  "id": 48,
+  "line_id": 12,
+  "machine_name": "Final Inspection M/c",
+  "machine_seq": null,
+  "parent_plc_id": null,
+  "ideal_cycle_time": 15.0,
+  "max_allowed_cycle": 16.0
+ },
+ "shifts": [
+  {
+   "id": 63,
+   "line_id": 12,
+   "shift_name": "A",
+   "start_time": "08:30:00",
+   "end_time": "17:15:00",
+   "crosses_midnight": false,
+   "total_plan": 1860,
+   "working_minutes": 465,
+   "startup_delay_min": 5,
+   "is_production": true,
+   "ot_enabled": true,
+   "ot_end_time": "06:20:00",
+   "ot_notes": null,
+   "ot_start_time": "17:15:00",
+   "ot_plan": null
+  },
+  {
+   "id": 64,
+   "line_id": 12,
+   "shift_name": "B",
+   "start_time": "18:30:00",
+   "end_time": "03:15:00",
+   "crosses_midnight": true,
+   "total_plan": 1860,
+   "working_minutes": 465,
+   "startup_delay_min": 5,
+   "is_production": true,
+   "ot_enabled": true,
+   "ot_end_time": "06:20:00",
+   "ot_notes": null,
+   "ot_start_time": "03:30:00",
+   "ot_plan": null
+  },
+  {
+   "id": 61,
+   "line_id": 12,
+   "shift_name": "GAP_AB",
+   "start_time": "17:15:00",
+   "end_time": "18:30:00",
+   "crosses_midnight": false,
+   "total_plan": 0,
+   "working_minutes": 0,
+   "startup_delay_min": 0,
+   "is_production": false,
+   "ot_enabled": false,
+   "ot_end_time": null,
+   "ot_notes": null,
+   "ot_start_time": null,
+   "ot_plan": null
+  },
+  {
+   "id": 62,
+   "line_id": 12,
+   "shift_name": "GAP_BA",
+   "start_time": "03:15:00",
+   "end_time": "08:30:00",
+   "crosses_midnight": false,
+   "total_plan": 0,
+   "working_minutes": 0,
+   "startup_delay_min": 0,
+   "is_production": false,
+   "ot_enabled": false,
+   "ot_end_time": null,
+   "ot_notes": null,
+   "ot_start_time": null,
+   "ot_plan": null
+  }
+ ],
+ "hourly_slots": [
+  {
+   "id": 34,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "08:30-09:30",
+   "start_time": "08:30:00",
+   "end_time": "09:30:00",
+   "crosses_midnight": false,
+   "working_minutes": 55,
+   "plan_pieces": 220,
+   "db_column_prefix": "hour_0830_0930",
+   "slot_order": 1
+  },
+  {
+   "id": 35,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "09:30-10:30",
+   "start_time": "09:30:00",
+   "end_time": "10:30:00",
+   "crosses_midnight": false,
+   "working_minutes": 50,
+   "plan_pieces": 200,
+   "db_column_prefix": "hour_0930_1030",
+   "slot_order": 2
+  },
+  {
+   "id": 36,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "10:30-11:30",
+   "start_time": "10:30:00",
+   "end_time": "11:30:00",
+   "crosses_midnight": false,
+   "working_minutes": 60,
+   "plan_pieces": 240,
+   "db_column_prefix": "hour_1030_1130",
+   "slot_order": 3
+  },
+  {
+   "id": 37,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "11:30-13:05",
+   "start_time": "11:30:00",
+   "end_time": "13:05:00",
+   "crosses_midnight": false,
+   "working_minutes": 60,
+   "plan_pieces": 240,
+   "db_column_prefix": "hour_1130_1305",
+   "slot_order": 4
+  },
+  {
+   "id": 38,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "13:05-14:05",
+   "start_time": "13:05:00",
+   "end_time": "14:05:00",
+   "crosses_midnight": false,
+   "working_minutes": 60,
+   "plan_pieces": 240,
+   "db_column_prefix": "hour_1305_1405",
+   "slot_order": 5
+  },
+  {
+   "id": 39,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "14:05-15:05",
+   "start_time": "14:05:00",
+   "end_time": "15:05:00",
+   "crosses_midnight": false,
+   "working_minutes": 50,
+   "plan_pieces": 200,
+   "db_column_prefix": "hour_1405_1505",
+   "slot_order": 6
+  },
+  {
+   "id": 40,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "15:05-16:05",
+   "start_time": "15:05:00",
+   "end_time": "16:05:00",
+   "crosses_midnight": false,
+   "working_minutes": 60,
+   "plan_pieces": 240,
+   "db_column_prefix": "hour_1505_1605",
+   "slot_order": 7
+  },
+  {
+   "id": 41,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "16:05-17:15",
+   "start_time": "16:05:00",
+   "end_time": "17:15:00",
+   "crosses_midnight": false,
+   "working_minutes": 70,
+   "plan_pieces": 280,
+   "db_column_prefix": "hour_1605_1715",
+   "slot_order": 8
+  },
+  {
+   "id": 2073,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "17:15-18:20 OT",
+   "start_time": "17:15:00",
+   "end_time": "18:20:00",
+   "crosses_midnight": false,
+   "working_minutes": 65,
+   "plan_pieces": 0,
+   "db_column_prefix": "hour_1715_1820_ot",
+   "slot_order": 999
+  },
+  {
+   "id": 2202,
+   "line_id": 12,
+   "shift_name": "A",
+   "slot_label": "17:15-06:20 OT",
+   "start_time": "17:15:00",
+   "end_time": "06:20:00",
+   "crosses_midnight": true,
+   "working_minutes": 785,
+   "plan_pieces": 0,
+   "db_column_prefix": "hour_1715_0620_ot",
+   "slot_order": 999
+  },
+  {
+   "id": 42,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "18:30-19:30",
+   "start_time": "18:30:00",
+   "end_time": "19:30:00",
+   "crosses_midnight": false,
+   "working_minutes": 55,
+   "plan_pieces": 220,
+   "db_column_prefix": "hour_1830_1930",
+   "slot_order": 1
+  },
+  {
+   "id": 43,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "19:30-20:30",
+   "start_time": "19:30:00",
+   "end_time": "20:30:00",
+   "crosses_midnight": false,
+   "working_minutes": 50,
+   "plan_pieces": 200,
+   "db_column_prefix": "hour_1930_2030",
+   "slot_order": 2
+  },
+  {
+   "id": 44,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "20:30-21:30",
+   "start_time": "20:30:00",
+   "end_time": "21:30:00",
+   "crosses_midnight": false,
+   "working_minutes": 60,
+   "plan_pieces": 240,
+   "db_column_prefix": "hour_2030_2130",
+   "slot_order": 3
+  },
+  {
+   "id": 45,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "21:30-23:05",
+   "start_time": "21:30:00",
+   "end_time": "23:05:00",
+   "crosses_midnight": false,
+   "working_minutes": 60,
+   "plan_pieces": 240,
+   "db_column_prefix": "hour_2130_2305",
+   "slot_order": 4
+  },
+  {
+   "id": 46,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "23:05-00:05",
+   "start_time": "23:05:00",
+   "end_time": "00:05:00",
+   "crosses_midnight": true,
+   "working_minutes": 60,
+   "plan_pieces": 240,
+   "db_column_prefix": "hour_2305_0005",
+   "slot_order": 5
+  },
+  {
+   "id": 47,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "00:05-01:05",
+   "start_time": "00:05:00",
+   "end_time": "01:05:00",
+   "crosses_midnight": false,
+   "working_minutes": 55,
+   "plan_pieces": 220,
+   "db_column_prefix": "hour_0005_0105",
+   "slot_order": 6
+  },
+  {
+   "id": 48,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "01:05-02:05",
+   "start_time": "01:05:00",
+   "end_time": "02:05:00",
+   "crosses_midnight": false,
+   "working_minutes": 55,
+   "plan_pieces": 220,
+   "db_column_prefix": "hour_0105_0205",
+   "slot_order": 7
+  },
+  {
+   "id": 49,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "02:05-03:15",
+   "start_time": "02:05:00",
+   "end_time": "03:15:00",
+   "crosses_midnight": false,
+   "working_minutes": 70,
+   "plan_pieces": 280,
+   "db_column_prefix": "hour_0205_0315",
+   "slot_order": 8
+  },
+  {
+   "id": 2022,
+   "line_id": 12,
+   "shift_name": "B",
+   "slot_label": "03:30-06:20 OT",
+   "start_time": "03:30:00",
+   "end_time": "06:20:00",
+   "crosses_midnight": false,
+   "working_minutes": 170,
+   "plan_pieces": 0,
+   "db_column_prefix": "hour_0330_0620_ot",
+   "slot_order": 999
+  }
+ ],
+ "breaks": [
+  {
+   "id": 121,
+   "line_id": 12,
+   "break_name": "Night Tea Break",
+   "start_time": "01:00:00",
+   "end_time": "01:10:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  },
+  {
+   "id": 122,
+   "line_id": 12,
+   "break_name": "Early Morning Break",
+   "start_time": "04:00:00",
+   "end_time": "04:10:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  },
+  {
+   "id": 123,
+   "line_id": 12,
+   "break_name": "Morning Tea Break",
+   "start_time": "10:00:00",
+   "end_time": "10:10:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  },
+  {
+   "id": 124,
+   "line_id": 12,
+   "break_name": "Lunch Break",
+   "start_time": "12:00:00",
+   "end_time": "12:35:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  },
+  {
+   "id": 125,
+   "line_id": 12,
+   "break_name": "Evening Tea Break",
+   "start_time": "14:30:00",
+   "end_time": "14:40:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  },
+  {
+   "id": 126,
+   "line_id": 12,
+   "break_name": "Dinner Break 1",
+   "start_time": "18:00:00",
+   "end_time": "18:10:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  },
+  {
+   "id": 127,
+   "line_id": 12,
+   "break_name": "Tea Break",
+   "start_time": "20:00:00",
+   "end_time": "20:10:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  },
+  {
+   "id": 128,
+   "line_id": 12,
+   "break_name": "Dinner Break 2",
+   "start_time": "22:00:00",
+   "end_time": "22:35:00",
+   "crosses_midnight": false,
+   "applies_to_shifts": "A,B"
+  }
+ ],
+ "models": [
+  {
+   "id": 508,
+   "line_id": 12,
+   "model_number": 4,
+   "model_name": "TRACK ASSY FRONT SEAT YTA 4 WAY INR RH",
+   "ideal_ct": null
+  },
+  {
+   "id": 509,
+   "line_id": 12,
+   "model_number": 9,
+   "model_name": "TRACK ASSY FRONT SEAT YHB 4 WAY OTR",
+   "ideal_ct": null
+  },
+  {
+   "id": 510,
+   "line_id": 12,
+   "model_number": 10,
+   "model_name": "TRACK ASSY FRONT SEAT YHB 4 WAY INR RH",
+   "ideal_ct": null
+  },
+  {
+   "id": 511,
+   "line_id": 12,
+   "model_number": 11,
+   "model_name": "TRACK ASSY FRONT SEAT YHB 4 WAY INR LH",
+   "ideal_ct": null
+  },
+  {
+   "id": 512,
+   "line_id": 12,
+   "model_number": 12,
+   "model_name": "TRACK ASSY FRONT SEAT YCA 4 WAY INR LH",
+   "ideal_ct": null
+  },
+  {
+   "id": 513,
+   "line_id": 12,
+   "model_number": 14,
+   "model_name": "TRACK ASSY FRONT SEAT 4 WAY INR RH",
+   "ideal_ct": null
+  },
+  {
+   "id": 514,
+   "line_id": 12,
+   "model_number": 15,
+   "model_name": "TRACK ASSY FRONT SEAT YTA 4 WAY INR LH",
+   "ideal_ct": null
+  }
+ ],
+ "status_map": [
+  {
+   "id": 20,
+   "line_id": 12,
+   "status_code": 0,
+   "status_name": "IDLE",
+   "loss_type": null
+  },
+  {
+   "id": 21,
+   "line_id": 12,
+   "status_code": 1,
+   "status_name": "RUNNING",
+   "loss_type": null
+  },
+  {
+   "id": 22,
+   "line_id": 12,
+   "status_code": 2,
+   "status_name": "BREAKDOWN",
+   "loss_type": "breakdown"
+  },
+  {
+   "id": 23,
+   "line_id": 12,
+   "status_code": 3,
+   "status_name": "QUALITY_ISSUE",
+   "loss_type": "quality"
+  },
+  {
+   "id": 24,
+   "line_id": 12,
+   "status_code": 4,
+   "status_name": "MODEL_SETUP",
+   "loss_type": "setup"
+  },
+  {
+   "id": 25,
+   "line_id": 12,
+   "status_code": 5,
+   "status_name": "MATERIAL_WAIT",
+   "loss_type": "material"
+  },
+  {
+   "id": 26,
+   "line_id": 12,
+   "status_code": 6,
+   "status_name": "OTHER_LOSS",
+   "loss_type": "others"
+  },
+  {
+   "id": 27,
+   "line_id": 12,
+   "status_code": 7,
+   "status_name": "CHANGE_OVER",
+   "loss_type": "change_over"
+  },
+  {
+   "id": 28,
+   "line_id": 12,
+   "status_code": 8,
+   "status_name": "BREAK",
+   "loss_type": "break"
+  }
+ ]
+}

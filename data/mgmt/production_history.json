@@ -1,0 +1,442 @@
+[
+ {
+  "record_date": "2026-07-11",
+  "total_actual": 0,
+  "total_plan": 1860
+ },
+ {
+  "record_date": "2026-07-13",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-14",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-15",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-16",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-17",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-18",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-20",
+  "total_actual": 3336,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-21",
+  "total_actual": 5551,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-22",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-23",
+  "total_actual": 0,
+  "total_plan": 1860
+ },
+ {
+  "record_date": "2026-07-24",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-25",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-26",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-27",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-28",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-29",
+  "total_actual": 0,
+  "total_plan": 1860
+ },
+ {
+  "record_date": "2026-07-30",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-07-31",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-01",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-02",
+  "total_actual": 2,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-03",
+  "total_actual": 3281,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-04",
+  "total_actual": 2092,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-05",
+  "total_actual": 5611,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-06",
+  "total_actual": 3316,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-07",
+  "total_actual": 3765,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-08",
+  "total_actual": 3493,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-09",
+  "total_actual": 32,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-10",
+  "total_actual": 3381,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-11",
+  "total_actual": 3364,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-12",
+  "total_actual": 3456,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-13",
+  "total_actual": 3407,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-14",
+  "total_actual": 3069,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-15",
+  "total_actual": 3,
+  "total_plan": 1860
+ },
+ {
+  "record_date": "2026-08-16",
+  "total_actual": 20,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-17",
+  "total_actual": 3263,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-18",
+  "total_actual": 3358,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-19",
+  "total_actual": 3566,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-20",
+  "total_actual": 3594,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-21",
+  "total_actual": 3655,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-22",
+  "total_actual": 3211,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-23",
+  "total_actual": 395,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-24",
+  "total_actual": 2681,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-25",
+  "total_actual": 2698,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-26",
+  "total_actual": 3802,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-27",
+  "total_actual": 2947,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-28",
+  "total_actual": 2,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-29",
+  "total_actual": 2,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-30",
+  "total_actual": 2,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-08-31",
+  "total_actual": 3266,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-01",
+  "total_actual": 1693,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-02",
+  "total_actual": 3519,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-03",
+  "total_actual": 2459,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-04",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-05",
+  "total_actual": 2909,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-06",
+  "total_actual": 3422,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-07",
+  "total_actual": 3482,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-08",
+  "total_actual": 3357,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-09",
+  "total_actual": 3485,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-10",
+  "total_actual": 3528,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-11",
+  "total_actual": 3618,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-12",
+  "total_actual": 3856,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-13",
+  "total_actual": 743,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-14",
+  "total_actual": 2,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-15",
+  "total_actual": 3569,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-16",
+  "total_actual": 3653,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-17",
+  "total_actual": 0,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-18",
+  "total_actual": 3710,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-19",
+  "total_actual": 2530,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-20",
+  "total_actual": 1917,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-21",
+  "total_actual": 3447,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-22",
+  "total_actual": 3825,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-23",
+  "total_actual": 3789,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-24",
+  "total_actual": 2117,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-25",
+  "total_actual": 3512,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-26",
+  "total_actual": 3401,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-27",
+  "total_actual": 4,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-28",
+  "total_actual": 1939,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-29",
+  "total_actual": 3460,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-09-30",
+  "total_actual": 3494,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-01",
+  "total_actual": 3857,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-02",
+  "total_actual": 1,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-03",
+  "total_actual": 3538,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-04",
+  "total_actual": 11,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-05",
+  "total_actual": 3459,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-06",
+  "total_actual": 3689,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-07",
+  "total_actual": 3781,
+  "total_plan": 3720
+ },
+ {
+  "record_date": "2026-10-08",
+  "total_actual": 80,
+  "total_plan": 1860
+ }
+]

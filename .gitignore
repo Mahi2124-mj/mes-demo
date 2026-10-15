@@ -1,0 +1,16 @@
+# Dependencies / build output — recreate with `npm install` and `npx vite build`
+node_modules/
+dist/
+
+# Runtime files
+logs/
+__pycache__/
+*.pyc
+
+# Plant camera footage (144 MB) — kept on the server only
+clips/
+
+# Saved by the demo pages at runtime (camera config may hold a password)
+data/camera.json
+data/machine.json
+data/comments.json

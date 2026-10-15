@@ -1,0 +1,386 @@
+{
+ "line_id": 12,
+ "line_name": "YCA-SS",
+ "financial_year": "2026-27",
+ "as_of": "2026-10-08",
+ "current_week": {
+  "index": 25,
+  "label": "OCT 2W"
+ },
+ "counts": {
+  "overdue": 8,
+  "due": 0,
+  "ok": 0,
+  "no_plan": 0
+ },
+ "machines": [
+  {
+   "machine_id": 49,
+   "machine_name": "Upper Rail Grease Machine",
+   "machine_seq": 1,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_01",
+   "plan_machine": "Upper Rail Grease Machine",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  },
+  {
+   "machine_id": 44,
+   "machine_name": "Lock Bar Insert M/c",
+   "machine_seq": 2,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_02",
+   "plan_machine": "Lock Bar Insert M/c",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  },
+  {
+   "machine_id": 45,
+   "machine_name": "Lower Rail Grease & Bar Coding M/c",
+   "machine_seq": 3,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_03",
+   "plan_machine": "Lower Rail Grease & Bar Coding M/c",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  },
+  {
+   "machine_id": 46,
+   "machine_name": "Rail Assy M/c # 01",
+   "machine_seq": 4,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_04",
+   "plan_machine": "Rail Assy M/c # 01",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  },
+  {
+   "machine_id": 47,
+   "machine_name": "Rail Assy M/c # 02",
+   "machine_seq": 5,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_05",
+   "plan_machine": "Rail Assy M/c # 02",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  },
+  {
+   "machine_id": 50,
+   "machine_name": "Semi Automatic & Bending M/c",
+   "machine_seq": 6,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_06",
+   "plan_machine": "Semi Automatic & Bending M/c",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  },
+  {
+   "machine_id": 224,
+   "machine_name": "Advance Bending in Lower Rail M/c",
+   "machine_seq": 9,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_09",
+   "plan_machine": "Advance Bending In Lower Rail M/c",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  },
+  {
+   "machine_id": 48,
+   "machine_name": "Final Inspection M/c",
+   "machine_seq": null,
+   "status": "OVERDUE",
+   "frequency": "4M",
+   "machine_code": "YCA_SS_08",
+   "plan_machine": "Final Inspection M/c",
+   "plan": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01",
+     "done": false
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08",
+     "done": false
+    },
+    {
+     "week": 37,
+     "label": "JAN 2W",
+     "date": "2027-01-08",
+     "done": false
+    }
+   ],
+   "overdue": [
+    {
+     "week": 4,
+     "label": "MAY 1W",
+     "date": "2026-05-01"
+    },
+    {
+     "week": 21,
+     "label": "SEP 2W",
+     "date": "2026-09-08"
+    }
+   ],
+   "next": {
+    "week": 37,
+    "label": "JAN 2W",
+    "date": "2027-01-08"
+   }
+  }
+ ]
+}
