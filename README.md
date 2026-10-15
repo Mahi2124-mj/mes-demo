@@ -43,8 +43,15 @@ Windows (PowerShell, in the repo folder):
 
 Rebuild after a frontend change: `npx vite build`, then reload the page.
 Needs Python 3.8+ (standard library only) and, for live cycle clips, **ffmpeg**
-(Windows: `winget install Gyan.FFmpeg`, then open a new terminal). The server prints
-whether it found ffmpeg when it starts.
+(Windows: unzip a build into the repo so that `ffmpeg\bin\ffmpeg.exe` exists — no PATH needed:
+
+    [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+    Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
+    Move-Item (Get-ChildItem ffmpeg-tmp)[0].FullName ffmpeg
+    Remove-Item ffmpeg.zip, ffmpeg-tmp -Recurse
+
+or install it system-wide). The server prints whether it found ffmpeg when it starts.
 
 ## Live data (MANAGEMENT-2)
 MANAGEMENT-2 uses its own line id (99), so every `/api/lines/99/...` call is answered from

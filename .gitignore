@@ -10,6 +10,9 @@ __pycache__/
 # Plant camera footage (144 MB) — kept on the server only
 clips/
 
+# Local ffmpeg build (Windows: ffmpeg\bin\ffmpeg.exe, found by camera.py)
+ffmpeg/
+
 # Saved by the demo pages at runtime (camera config may hold a password)
 data/camera.json
 data/machine.json

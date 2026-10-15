@@ -164,7 +164,7 @@ export function CameraLive({ dark = false }) {
         <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, fontSize: 11, lineHeight: 1.6, color: "#92400e",
                       background: "rgba(217,119,6,.1)", border: "1px solid rgba(217,119,6,.3)" }}>
           <b>ffmpeg not found on the server PC.</b> The preview uses camera snapshots and cycle clips are not recorded.
-          Install it (<code>winget install Gyan.FFmpeg</code>) and restart the server.
+          Put it in the project folder as <code>ffmpeg\bin\ffmpeg.exe</code> (see README) and restart the server.
         </div>
       )}
       {cam && cam.recording && (
