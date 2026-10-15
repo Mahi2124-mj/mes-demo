@@ -9,6 +9,7 @@ fi
 if ss -ltn | grep -q ":$PORT "; then
   echo "Port $PORT is in use by another program — not starting."; exit 1
 fi
+mkdir -p logs
 [ -f dist/index.html ] || npx vite build
 setsid nohup python3 server.py "$PORT" >> logs/server.log 2>&1 < /dev/null &
 echo $! > logs/server.pid

@@ -2,11 +2,13 @@
 // (AdminPanel.jsx → MachinesPage: ① Machines / ② PLC Config / ③ Monitor Config).
 //
 // The demo holds exactly ONE machine. Everything is stored by the demo's own
-// server (GET/PUT /api/demo/machine). This page never talks to a PLC or a camera.
+// server (GET/PUT /api/demo/machine). The server's collector reads this PLC
+// (read only); tab ④ shows what it reads (GET /api/demo/collector).
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import PageTopbar from "../components/PageTopbar";
 import { COLORS, thStyle, tdStyle } from "../components/whiteTheme";
+import { CollectorLive, useCollector } from "../components/LivePanels";
 
 const API_URL = "/api/demo/machine";
 
@@ -28,7 +30,7 @@ const MAX_DATA_REGS = 15;
 const DEFAULTS = {
   machine_name: DEFAULT_MACHINE_NAME,
   plc_model: "Mitsubishi FX5U-32MT/ESS",
-  plc_ip: "",
+  plc_ip: "192.168.30.10",
   plc_port: 5000,
   protocol: "SLMP 3E (binary)",
   count_mode: "bit",
@@ -416,14 +418,24 @@ const PAGE_CSS = `
   }
 `;
 
-const TAB_KEYS = ["machines", "plc", "monitor"];
-const TAB_LABELS = ["① Machines", "② PLC Config", "③ Monitor Config"];
+const TAB_KEYS = ["machines", "plc", "monitor", "collector"];
+const TAB_LABELS = ["① Machines", "② PLC Config", "③ Monitor Config", "④ Collector Data"];
 const tabFromHash = () => {
   try {
     const i = TAB_KEYS.indexOf((window.location.hash || "").replace(/^#/, ""));
     return i >= 0 ? i : 0;
   } catch { return 0; }
 };
+
+// Live connection state for the machine list.
+function CollectorPill() {
+  const { data } = useCollector(3000);
+  const st = data?.plc?.state;
+  const map = { connected: ["Connected", "green"], connecting: ["Connecting", "amber"], error: ["Not connected", "red"],
+                not_configured: ["IP not set", "amber"] };
+  const [label, color] = map[st] || ["…", "gray"];
+  return <Pill label={label} color={color} />;
+}
 
 // ─── Page ─────────────────────────────────────────────────────
 export default function MachineConfig() {
@@ -697,7 +709,7 @@ export default function MachineConfig() {
                             <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 600 }}>
                               {m.ideal_cycle_time != null && Number.isFinite(m.ideal_cycle_time) ? `${m.ideal_cycle_time.toFixed(1)} s` : "—"}
                             </td>
-                            <td style={td}><Pill label="Config only" color="gray" /></td>
+                            <td style={td}><CollectorPill /></td>
                             <td style={{ ...td, textAlign: "right" }}>
                               <div style={{ display: "inline-flex", gap: 8 }}>
                                 <Btn size="sm" onClick={() => pickTab(1)}>Edit PLC</Btn>
@@ -711,7 +723,10 @@ export default function MachineConfig() {
                   </table>
                 </div>
                 <p style={{ fontSize: 11, color: "#94a3b8", margin: "12px 0 0" }}>
-                  Configuration is stored by the demo server only. No PLC or camera connection is made.
+                  The demo server's collector reads this PLC (read only, nothing is written) and feeds MANAGEMENT-2.
+                  Saving the PLC settings reconnects it. <button type="button" onClick={() => pickTab(3)}
+                    style={{ border: "none", background: "none", padding: 0, color: "#1e40af", fontWeight: 700, cursor: "pointer", fontSize: 11 }}>
+                    See collector data →</button>
                 </p>
               </Card>
             )}
@@ -1035,6 +1050,9 @@ export default function MachineConfig() {
                 </Card>
               </div>
             )}
+
+            {/* ── Sub-page 3: live collector data ── */}
+            {subPage === 3 && <CollectorLive />}
           </>
         )}
       </div>
@@ -1042,7 +1060,7 @@ export default function MachineConfig() {
       {/* Reset confirmation (MES Modal style) */}
       <Modal open={resetOpen} onClose={closeReset} title="Reset to defaults">
         <p style={{ fontSize: 13, color: "#334155", margin: 0, lineHeight: 1.55 }}>
-          Every PLC field, data register and input returns to the demo defaults. The PLC IP is cleared and must be set again.
+          Every PLC field, data register and input returns to the demo defaults (PLC IP 192.168.30.10).
         </p>
         <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0" }}>
           Nothing is stored until you press <b>Save</b>.

@@ -1,4 +1,6 @@
 // Demo: second Management page — a copy of Fullscreen.jsx, edited separately.
+// It shows LIVE data: the demo machine's own PLC (collector) and camera, served by the
+// demo server under line id 99 (see server.py "live data"), not the recorded shift.
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal }                                       from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
@@ -7,6 +9,7 @@ import axios from "axios";
 import VideoProgressBar from "../components/VideoProgressBar";
 import SlideNav from "../components/SlideNav";
 import DocSheetsRow from "../components/DocSheets";
+import { CameraLive, CollectorLive, LiveModal } from "../components/LivePanels";
 
 // 2026-06-01 — a timeout (server answers /realtime in ~13ms, so this NEVER
 // trips a healthy call) so a request queued behind a stuck socket releases and
@@ -24,13 +27,8 @@ import DocSheetsRow from "../components/DocSheets";
 // is raising the NIC ring (needs root) and taking CPU load off the box.
 const api = axios.create({ baseURL: "", timeout: 5000 });
 
-// Demo clone: the dashboard replays a recorded shift (YCA-SS, 2026-10-08, shift A, Final Inspection
-// cycles #1600-#1700). The page clock is pinned to that shift so the timeline, the "NOW" hourly slot and
-// the daily charts line up with the recorded cycles (last cycle 16:49:21). It ticks from 16:49:25 and
-// loops every minute. Date.now() is left untouched (watchdog, cache-busters).
-const DEMO_T0 = new Date("2026-10-08T16:49:25").getTime();
-const PAGE_T0 = Date.now();
-const demoNow = () => new Date(DEMO_T0 + ((Date.now() - PAGE_T0) % 55000));
+// Live demo: the page runs on the real clock (the MANAGEMENT page keeps the recorded shift's pinned clock).
+const demoNow = () => new Date();
 api.interceptors.request.use(cfg => {
   const t = sessionStorage.getItem("mes_token");
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
@@ -751,7 +749,7 @@ export default function Management2() {
   useEffect(() => {
     if (/^\d+$/.test(urlLineRef || "")) { setResolvedId(urlLineRef); return; }
     let stop = false;
-    fetch(`/api/lines/resolve-ref/${encodeURIComponent(urlLineRef || "")}`)
+    fetch(`/api/lines/resolve-ref/${encodeURIComponent(urlLineRef || "")}?source=live`)
       .then(r => r.ok ? r.json() : null)
       .then(j => { if (!stop && j?.line_id) setResolvedId(String(j.line_id)); })
       .catch(() => { /* unknown name — page shows its normal empty state */ });
@@ -940,6 +938,7 @@ export default function Management2() {
   // screen instead of spinning on "CONNECTING…" forever + reload-looping.
   const [notProvisioned, setNotProvisioned] = useState(false);
   const [now,  setNow]       = useState(demoNow());
+  const [liveView, setLiveView] = useState(null);   // "camera" | "collector" popup
 
   const chartRef    = useRef(null);
   const chartInst   = useRef(null);
@@ -1771,11 +1770,13 @@ export default function Management2() {
         .then(res => {
           // 2026-06-10 — drop phantom cycles (CT < half ideal) from the CYCLE
           // TIME graph + counts: 08:30 warm-up scan-fail rows the PLC register
-          // never counts (implausibly fast).  Final Inspection ideal = 15s.
+          // never counts (implausibly fast).  Live demo: half of the machine's
+          // own ideal CT (Machine Config), not the old fixed 7.5 s.
+          const minCt = (Number(rtRef.current?.cycle_time_plan) || 15) / 2;
           setCmsData(
             (Array.isArray(res.data) ? res.data : []).filter(c => {
               const ct = Number(c.ct_value);
-              return !(Number.isFinite(ct) && ct < 7.5);
+              return !(Number.isFinite(ct) && ct < minCt);
             }));
           if (first) setCmsLoading(false);
         })
@@ -3956,6 +3957,14 @@ export default function Management2() {
               </span>
             </div>
             <span style={{fontFamily:"monospace",fontSize:16,fontWeight:800,color:textSub,letterSpacing:".04em"}}>{timeStr}</span>
+            <button onClick={()=>setLiveView("camera")} title="Live camera preview"
+              style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
+              📷 CAMERA
+            </button>
+            <button onClick={()=>setLiveView("collector")} title="PLC collector data"
+              style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
+              📡 COLLECTOR
+            </button>
             <button onClick={()=>setDark(d=>!d)} style={{padding:"4px 10px",borderRadius:6,
               border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
               {D?"☀ LIGHT":"🌙 DARK"}
@@ -6142,6 +6151,13 @@ export default function Management2() {
           overlayPosStyle={overlayPosStyle}
         />
       )}
+
+      <LiveModal open={liveView === "camera"} title="Camera — live preview" dark={D} onClose={() => setLiveView(null)}>
+        <CameraLive dark={D} />
+      </LiveModal>
+      <LiveModal open={liveView === "collector"} title="Collector data — PLC live" dark={D} wide onClose={() => setLiveView(null)}>
+        <CollectorLive dark={D} />
+      </LiveModal>
 
       {ngListModal && (
         <NgListModal

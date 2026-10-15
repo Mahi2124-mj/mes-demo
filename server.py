@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
-"""MES demo clone — standalone server (Python standard library only).
+"""MES demo clone — standalone server (Python standard library + optional ffmpeg).
 
 Serves the built frontend from ./dist and a small /api that mimics the MES
-endpoints the three demo pages use. It has NO connection to the live MES:
-no database, no PLC, no camera, no calls to ports 8080/5555/5656/5700.
+endpoints the demo pages use. It never talks to the live MES (no database,
+no calls to ports 8080/5555/5656/5700).
+
+Two data sources:
+  * Recorded (SUPERVISOR, MANAGEMENT): data/cycles.json — YCA-SS 2026-10-08 shift A,
+    cycles #1600-#1700 that have a clip, with clips/<machine>/cycle_<seq>.mp4.
+  * Live (MANAGEMENT-2, line id LIVE_LINE_ID): the demo machine's own PLC and camera.
+    collector.py reads the FX5U over SLMP (read only) into data/live/, camera.py records
+    the camera and cuts clips/live/cycle_<seq>.mp4 per cycle (needs ffmpeg).
 
 Data:
-  data/cycles.json   — the recorded Final Inspection cycles shown by the demo (see its "source");
-                       currently YCA-SS 2026-10-08 shift A, cycles #1600-#1700 that have a clip
-  clips/<machine>/cycle_<seq>.mp4 — the matching recorded clips (H.264)
-  data/machine.json, data/camera.json — saved by the config pages
+  data/machine.json, data/camera.json — saved by the config pages (PLC / camera settings)
   data/comments.json — cycle comments / remarks typed in the demo
+  data/live/ — live cycles and status timeline, one JSON-lines file per shift
 
 Run:  python3 server.py [port]        (default 5000)
 """
+import atexit
 import datetime as dt
 import json
 import os
+import signal
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+
+from camera import Camera
+from collector import OFFLINE, Collector, LiveStore, ShiftClock
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -47,10 +58,30 @@ MACHINE_DEFAULTS = {
     "ng_data_register": "D102", "shift_reset_bit": "L110", "status_address": "D100",
     "ideal_cycle_time": 20.0, "max_allowed_cycle": 40.0, "ok_ng_pulse_min_gap": 0.5,
     "nf2_camera_id": "CAM-01", "machine_seq": 0,
+    # Same lists the Machine Config page starts from; the collector reads these too.
+    "monitor_registers": [
+        {"register": r, "content": c, "unit": u, "example": e} for r, c, u, e in (
+            ("D103", "Last cycle time", "0.1 s", "245 → 24.5 s"),
+            ("D104", "Direction", "1 = A→B, 2 = B→A", "1 → A→B"),
+            ("D105", "NG reason code", "Code", "Raw code"),
+            ("D106", "Cycle sequence", "Count", "1287"),
+            ("D107", "Target cycle time", "0.1 s", "200 → 20.0 s"),
+            ("D109", "Final torque", "0.01 Nm", "1350 → 13.50 Nm"),
+            ("D110", "Breakaway torque", "0.01 Nm", "1420 → 14.20 Nm"),
+            ("D111", "Torque low limit", "0.01 Nm", "Default 1200 → 12.00 Nm"),
+            ("D112", "Torque high limit", "0.01 Nm", "Default 1500 → 15.00 Nm"),
+            ("D114", "Torque flags", "Bitmask", "One flag per bit"),
+            ("D118", "Torque sequence handshake", "Counter", "Changes on each tightening"))],
+    "inputs": [{"type": "digital", "address": a, "signal": sg, "note": n} for a, sg, n in (
+        ("X0", "Gun in stand", "M18 inductive sensor"), ("X1", "Nut seated A", ""), ("X2", "Nut seated B", ""),
+        ("X3", "Torque OK", ""), ("X4", "Torque NG", ""), ("X5", "Gun running", ""), ("X6", "Reset", ""),
+        ("X7", "E-stop healthy", ""), ("X10", "Calibration mode", ""))] + [
+        {"type": "analog", "address": "FX5-4AD CH1", "signal": "Torque A", "note": "±10 V = ±30 Nm"},
+        {"type": "analog", "address": "FX5-4AD CH2", "signal": "Torque B", "note": "±10 V = ±30 Nm"}],
 }
 CAMERA_DEFAULTS = {
     "camera_id": "CAM-01", "name": "Station camera", "ip": "192.168.30.20", "port": 554,
-    "rtsp_path": "/Streaming/Channels/101", "username": "admin", "password": "",
+    "rtsp_path": "/MediaInput/h264", "username": "admin", "password": "",
     "assigned_machine": "Nut-Runner Demo Station", "recording_enabled": True,
     "codec": "H.264 Main", "resolution": "1920 × 1080", "fps": 25, "bitrate_kbps": 2000,
     "iframe_interval": 25, "video_save_path": os.path.join(HERE, "clips"),
@@ -284,7 +315,6 @@ MGMT_MACHINES = [{"id": (_load("mgmt/line.json", {}).get("plc_config") or {}).ge
 def status_log():
     """Timeline: line RUNNING from the first demo cycle (12:52:50) onward.
     ts is set near real time only so the page's 16 h freshness filter keeps it; it is never displayed."""
-    import time
     cyc = _main_cycles()
     t0 = _ts(cyc[0]) - dt.timedelta(seconds=cyc[0]["ct"]) if cyc else dt.datetime.now()
     nmf = t0.hour * 60 + t0.minute + t0.second / 60 + t0.microsecond / 6e7
@@ -301,6 +331,285 @@ def comments_history():
              for r in store["remarks"]]
     rows.sort(key=lambda r: r["created_at"], reverse=True)
     return {"rows": rows}
+
+
+# ---------- live data (MANAGEMENT-2) ----------
+# The live dashboard uses its own line id, so every /api/lines/<id>/... call it makes is
+# answered from the PLC collector instead of the recorded shift.  Line rules (shifts,
+# hourly slots, status codes) still come from data/mgmt/line.json.
+LIVE_LINE_ID = 99
+
+
+def machine_cfg():
+    return {**MACHINE_DEFAULTS, **_load("machine.json", {})}
+
+
+def camera_cfg():
+    return {**CAMERA_DEFAULTS, **_load("camera.json", {})}
+
+
+STORE = LiveStore(os.path.join(DATA, "live"))
+CLOCK = ShiftClock(_line_cfg)
+CAMERA = Camera(camera_cfg, CLIPS, HERE)
+COLLECTOR = Collector(STORE, CLOCK, machine_cfg, _line_cfg, on_cycle=CAMERA.on_cycle)
+
+
+def _live_ideal():
+    return float(machine_cfg().get("ideal_cycle_time") or 20.0)
+
+
+def _live_pick(q):
+    """(record_date, shift) the live page asks for; default = the current production shift."""
+    d, sh = (q.get("date") or [""])[0], (q.get("shift") or [""])[0]
+    if d and sh and CLOCK.shift_row(sh):
+        try:
+            dt.date.fromisoformat(d)
+            return d, sh
+        except ValueError:
+            pass
+    rd, sh, _ = CLOCK.at(dt.datetime.now())
+    return rd, sh
+
+
+def _live_loss_types():
+    out = {r["status_name"]: r.get("loss_type") for r in _line_cfg().get("status_map", [])}
+    return out or {"BREAKDOWN": "breakdown", "QUALITY_ISSUE": "quality", "MODEL_SETUP": "setup",
+                   "MATERIAL_WAIT": "material", "OTHER_LOSS": "others", "CHANGE_OVER": "change_over", "BREAK": "break"}
+
+
+def _live_segments(rd, sh, t_from, t_to):
+    """[(start, end, status)] from the shift's status log, clipped to [t_from, t_to]."""
+    log = sorted(STORE.status_log(rd, sh), key=lambda e: e["ts"])
+    segs = []
+    for i, e in enumerate(log):
+        s = dt.datetime.fromtimestamp(e["ts"] / 1000)
+        n = dt.datetime.fromtimestamp(log[i + 1]["ts"] / 1000) if i + 1 < len(log) else t_to
+        s, n = max(s, t_from), min(n, t_to)
+        if n > s:
+            segs.append((s, n, e["status"]))
+    return segs
+
+
+def _live_window(rd, sh):
+    """Shift start/end, 'now' capped at the shift end, and when live data starts in this shift
+    (first cycle or first PLC contact — time before the collector ran is not counted)."""
+    row = CLOCK.shift_row(sh) or CLOCK.production_shifts()[0]
+    t0, t1 = CLOCK.bounds(dt.date.fromisoformat(rd), row)
+    now = min(dt.datetime.now(), t1)
+    starts = [dt.datetime.fromtimestamp(e["ts"] / 1000) for e in STORE.status_log(rd, sh) if e.get("status") != OFFLINE]
+    cyc = STORE.cycles(rd, sh)
+    if cyc:
+        starts.append(dt.datetime.fromisoformat(cyc[0]["ts"]) - dt.timedelta(seconds=cyc[0]["ct"]))
+    w0 = max(t0, min(starts)) if starts else None
+    return row, t0, t1, now, w0
+
+
+def _live_slots(rd, sh):
+    return [x for x in _line_cfg().get("hourly_slots", [])
+            if x.get("shift_name") == sh and not str(x.get("db_column_prefix", "")).endswith("_ot")]
+
+
+def _live_slot_bounds(rd, sh, sl):
+    s0 = CLOCK.at_time(rd, sh, sl["start_time"])
+    s1 = CLOCK.at_time(rd, sh, sl["end_time"])
+    if s1 <= s0:
+        s1 += dt.timedelta(days=1)
+    return s0, s1
+
+
+def live_realtime(q):
+    rd, sh = _live_pick(q)
+    ideal = _live_ideal()
+    cfg = machine_cfg()
+    row, t0, t1, now, w0 = _live_window(rd, sh)
+    cyc = STORE.cycles(rd, sh)
+    ok = sum(1 for c in cyc if not c["is_ng"])
+    ng = len(cyc) - ok
+    run_s = sum(c["ct"] for c in cyc)
+    segs = _live_segments(rd, sh, w0, now) if w0 else []
+    loss_types = _live_loss_types()
+    loss = {}
+    for s, e, st in segs:
+        lt = loss_types.get(st)
+        if lt:
+            loss[lt] = loss.get(lt, 0.0) + (e - s).total_seconds()
+    window_s = max(1.0, ((now - w0).total_seconds() if w0 else 0.0) - loss.get("break", 0.0))
+    speed_loss = sum(max(0.0, c["ct"] - ideal) for c in cyc)
+    avail = min(100.0, 100.0 * run_s / window_s) if w0 else 0.0
+    perf = min(100.0, 100.0 * (run_s - speed_loss) / run_s) if run_s else 0.0
+    qual = 100.0 * ok / len(cyc) if cyc else 0.0
+    oee = avail * perf * qual / 10000.0
+    grade = ("EXCELLENT" if oee >= 85 else "GOOD" if oee >= 75 else "AVERAGE" if oee >= 65 else "POOR")
+    working_min = float(row.get("working_minutes") or ((t1 - t0).total_seconds() / 60))
+    shift_plan = int(working_min * 60 // ideal)
+    current = CLOCK.at(dt.datetime.now())[:2] == (rd, sh)
+    rt = {
+        "record_date": rd, "shift_name": sh, "line_name": LINE["line_name"],
+        "shift_start_time": row.get("start_time"), "shift_end_time": row.get("end_time"),
+        "operating_status": COLLECTOR.current_status() if current else "IDLE",
+        "current_model_number": None, "current_model_name": None,
+        "machine_name": cfg.get("machine_name"),
+        "ok_count": ok, "ng_count": ng, "shift_plan": shift_plan,
+        "cycle_time_plan": ideal, "cycle_time_actual": round(run_s / len(cyc), 2) if cyc else None,
+        "availability": round(avail, 2), "performance": round(perf, 2), "quality_oee": round(qual, 2),
+        "overall_oee": round(oee, 2), "oee_grade": grade, "is_shift_completed": dt.datetime.now() >= t1,
+        "is_gap_time": False,
+        "loss_breakdown_seconds": round(loss.get("breakdown", 0)), "loss_quality_seconds": round(loss.get("quality", 0)),
+        "loss_setup_seconds": round(loss.get("setup", 0)), "loss_material_seconds": round(loss.get("material", 0)),
+        "loss_others_seconds": round(loss.get("others", 0)), "loss_change_over_seconds": round(loss.get("change_over", 0)),
+        "loss_speed_seconds": round(speed_loss),
+        "min_ct": min((c["ct"] for c in cyc), default=None), "max_ct": max((c["ct"] for c in cyc), default=None),
+        "collector_status": "running" if COLLECTOR.snapshot().get("state") == "connected" else "stopped",
+        "ot_active_shift": None, "ot_plan": None,
+        "takt_seconds": ideal, "working_minutes": working_min,
+        "planned_takt_seconds": ideal, "energy_per_part": None, "andon_calls": 0,
+    }
+    newest = [c["ct"] for c in reversed(cyc)][:20]
+    for i, v in enumerate(newest):
+        rt[f"ct{i + 1}"] = v
+    rt["ct_avg_20"] = round(sum(newest) / len(newest), 2) if newest else None
+    plan_done = 0
+    for sl in _live_slots(rd, sh):
+        s0, s1 = _live_slot_bounds(rd, sh, sl)
+        inside = [c for c in cyc if s0 <= dt.datetime.fromisoformat(c["ts"]) < s1]
+        full = float(sl.get("working_minutes") or (s1 - s0).total_seconds() / 60) * 60 / ideal
+        lo, hi = max(s0, w0) if w0 else s1, min(s1, now)
+        plan = int(full * max(0.0, (hi - lo).total_seconds()) / (s1 - s0).total_seconds())
+        plan_done += plan
+        sok = sum(1 for c in inside if not c["is_ng"])
+        pre = sl["db_column_prefix"]
+        rt.update({f"{pre}_plan": plan, f"{pre}_ok": sok, f"{pre}_ng": len(inside) - sok,
+                   f"{pre}_actual": len(inside), f"{pre}_variance": len(inside) - plan})
+    rt["shift_plan_completed"] = plan_done
+    rt["shift_plan_remaining"] = max(0, shift_plan - plan_done)
+    return rt
+
+
+def live_hourly_loss_breakdown(q):
+    rd, sh = _live_pick(q)
+    ideal = _live_ideal()
+    _, _, _, now, w0 = _live_window(rd, sh)
+    cyc = STORE.cycles(rd, sh)
+    loss_types = _live_loss_types()
+    keys = ("loss_breakdown", "loss_quality", "loss_material", "loss_setup", "loss_change_over", "loss_speed", "loss_others")
+    slots, tot = [], dict.fromkeys(keys + ("total_loss",), 0)
+    for sl in _live_slots(rd, sh):
+        s0, s1 = _live_slot_bounds(rd, sh, sl)
+        row = {"slot_label": sl["slot_label"], "start": sl["start_time"][:5], "end": sl["end_time"][:5],
+               **dict.fromkeys(keys, 0)}
+        row["loss_speed"] = round(sum(max(0.0, c["ct"] - ideal) for c in cyc
+                                      if s0 <= dt.datetime.fromisoformat(c["ts"]) < s1))
+        if w0:
+            for s, e, st in _live_segments(rd, sh, max(s0, w0), min(s1, now)):
+                lt = loss_types.get(st)
+                if lt and f"loss_{lt}" in row:
+                    row[f"loss_{lt}"] += round((e - s).total_seconds())
+        row["total_loss"] = sum(row[k] for k in keys)
+        for k in keys + ("total_loss",):
+            tot[k] += row[k]
+        slots.append(row)
+    return {"date": rd, "shift_name": sh, "slots": slots, "totals": tot}
+
+
+def live_ct_history(q):
+    rd, sh = _live_pick(q)
+    return [{"id": c["cycle_seq"], "ts": c["ts"], "record_date": rd, "shift_name": sh, "ct_value": c["ct"],
+             "cycle_seq": c["cycle_seq"], "part_code": c.get("part_code"), "is_ng": c["is_ng"]}
+            for c in STORE.cycles(rd, sh)]
+
+
+def live_cycle_extremes(q):
+    rd, sh = _live_pick(q)
+    cyc = STORE.cycles(rd, sh)
+    if not cyc:
+        return {"min": None, "max": None, "shift": sh, "date": rd}
+    pick = lambda c: {"ts": c["ts"], "ct_value": c["ct"], "part_code": c.get("part_code"),
+                      "is_ng": c["is_ng"], "cycle_seq": c["cycle_seq"], "shift_name": sh}
+    return {"min": pick(min(cyc, key=lambda c: c["ct"])), "max": pick(max(cyc, key=lambda c: c["ct"])),
+            "shift": sh, "date": rd}
+
+
+def live_status_log(q):
+    rd, sh = _live_pick(q)
+    return [{"ts": e["ts"], "nowMinFrac": e["nowMinFrac"], "status": e["status"], "shift": sh}
+            for e in STORE.status_log(rd, sh)]
+
+
+def live_ct_histogram(q):
+    try:
+        days = max(1, min(365, int((q.get("days") or ["30"])[0])))
+    except ValueError:
+        days = 30
+    since = (dt.date.today() - dt.timedelta(days=days - 1)).isoformat()
+    buckets = {}
+    for c in STORE.all_cycles(since):
+        b = round(c["ct"], 1)
+        buckets[b] = buckets.get(b, 0) + 1
+    rows = [{"ct": k, "count": v} for k, v in sorted(buckets.items())]
+    peak = max(rows, key=lambda r: r["count"]) if rows else {"ct": None, "count": 0}
+    return {"total_cycles": sum(buckets.values()), "peak_bucket": peak["ct"], "peak_count": peak["count"],
+            "buckets": rows, "window_days": days}
+
+
+def live_production_history():
+    ideal = _live_ideal()
+    by_day = {}
+    for d, sh, _ in STORE.shift_files():
+        cyc = STORE.cycles(d, sh)
+        row = CLOCK.shift_row(sh) or {}
+        e = by_day.setdefault(d, {"record_date": d, "total_actual": 0, "total_plan": 0})
+        e["total_actual"] += sum(1 for c in cyc if not c["is_ng"])
+        e["total_plan"] += int(float(row.get("working_minutes") or 0) * 60 // ideal)
+    return [by_day[k] for k in sorted(by_day)]
+
+
+def live_ng_list(q):
+    d = (q.get("date") or [""])[0] or _live_pick({})[0]
+    label = (q.get("slot_label") or [""])[0]
+    lo, hi = (label.split("-") + [""])[:2] if label and label != "00:00-23:59" else ("", "")
+    rows = []
+    for rd, sh, _ in STORE.shift_files():
+        if rd != d:
+            continue
+        for c in STORE.cycles(rd, sh):
+            hm = c["ts"][11:16]
+            if c["is_ng"] and (not lo or (lo <= hm < hi if lo < hi else hm >= lo or hm < hi)):
+                rows.append({"ts": c["ts"], "part_code": c.get("part_code"), "cycle_seq": c["cycle_seq"],
+                             "ct_value": c["ct"], "shift_name": sh, "leader_remark": ""})
+    return {"line_id": LIVE_LINE_ID, "date": d, "slot_label": label, "count": len(rows), "rows": rows}
+
+
+def live_line():
+    cfg = machine_cfg()
+    line = _load("mgmt/line.json", {"id": LINE_ID, **LINE})
+    ideal = _live_ideal()
+    return {**line, "id": LIVE_LINE_ID, "ideal_cycle_time": ideal, "planned_takt_time": ideal,
+            "collector_status": "running" if COLLECTOR.snapshot().get("state") == "connected" else "stopped",
+            "plc_config": {"id": 1, "line_id": LIVE_LINE_ID, "machine_name": cfg.get("machine_name"),
+                           "machine_seq": None, "parent_plc_id": None, "ideal_cycle_time": ideal,
+                           "max_allowed_cycle": cfg.get("max_allowed_cycle")}}
+
+
+def collector_view():
+    """Everything the 'Collector data' panels show, in one poll."""
+    rd, sh, in_gap = CLOCK.at(dt.datetime.now())
+    cyc = STORE.cycles(rd, sh)
+    cam = CAMERA.snapshot()
+    cfg = machine_cfg()
+    recent = []
+    for c in reversed(cyc[-25:]):
+        recent.append({**c, "clip": CAMERA.clip_path(c["cycle_seq"]) is not None})
+    return {
+        "plc": {**COLLECTOR.snapshot(), "plc_ip": cfg.get("plc_ip"), "plc_port": cfg.get("plc_port"),
+                "protocol": cfg.get("protocol"), "count_mode": cfg.get("count_mode"),
+                "machine_name": cfg.get("machine_name"), "status": COLLECTOR.current_status()},
+        "shift": {"record_date": rd, "shift_name": sh, "in_gap": in_gap,
+                  "ok": sum(1 for c in cyc if not c["is_ng"]), "ng": sum(1 for c in cyc if c["is_ng"]),
+                  "total": len(cyc)},
+        "recent_cycles": recent,
+        "camera": {**cam, "ip": camera_cfg().get("ip"), "name": camera_cfg().get("name")},
+        "server_time": dt.datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 # ---------- HTTP ----------
@@ -411,10 +720,18 @@ class Handler(BaseHTTPRequestHandler):
         parts = p.split("/")                      # ['', 'api', ...]
 
         if p.startswith("/api/lines/resolve-ref/"):
+            if (q.get("source") or [""])[0] == "live":
+                return self._json({**LINE, "line_id": LIVE_LINE_ID})
             return self._json(LINE)
         if (p.startswith("/api/lines/") and len(parts) >= 4 and not parts[3].isdigit()) or \
            (p.startswith("/api/poka-yoke/") and len(parts) >= 5 and not parts[4].isdigit()):
             return self._json({"detail": "line id must be an integer"}, 422)
+        if p.startswith("/api/demo/"):
+            return self._demo_get(p, q)
+        live = str(LIVE_LINE_ID)
+        if (len(parts) >= 4 and parts[2] == "lines" and parts[3] == live) or \
+           (len(parts) >= 5 and parts[2] == "poka-yoke" and parts[4] == live) or p == f"/api/pm-status/line/{live}":
+            return self._live_get(p, parts, q)
         if p == "/api/lines":
             return self._json([{"id": LINE_ID, "line_name": LINE["line_name"], "line_code": LINE["line_code"],
                                 "db_table_name": _line_cfg().get("db_table_name", ""), "is_active": True}])
@@ -488,19 +805,130 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"line_id": LINE_ID, "count": 0, "slips": [], "by_shift": [], "grace_min": 0})
         if p == "/api/push/inbox":
             return self._json({"unread": 0, "items": []})
+        return self._json({})                     # any other MES GET: harmless empty answer, never 401
+
+    do_HEAD = do_GET
+
+    def _demo_get(self, p, q):
         if p == "/api/demo/machine":
-            return self._json({**MACHINE_DEFAULTS, **_load("machine.json", {})})
+            return self._json(machine_cfg())
         if p == "/api/demo/camera":
-            cam = {**CAMERA_DEFAULTS, **_load("camera.json", {})}
+            cam = camera_cfg()
             cam["password_set"] = bool(cam.get("password"))
             cam["password"] = ""                  # never send the stored password back
             return self._json(cam)
         if p == "/api/demo/camera/sample-clip":
             full = os.path.join(CLIPS, "sample.mp4")
             return self._file(full) if os.path.isfile(full) else self._json({"detail": "No sample clip"}, 404)
-        return self._json({})                     # any other MES GET: harmless empty answer, never 401
+        if p == "/api/demo/collector":
+            return self._json(collector_view())
+        if p == "/api/demo/camera/live.mjpg":
+            return self._mjpeg()
+        if p == "/api/demo/camera/snapshot.jpg":
+            return self._snapshot()
+        return self._json({"detail": "Not found"}, 404)
 
-    do_HEAD = do_GET
+    def _live_get(self, p, parts, q):
+        if p == f"/api/lines/{LIVE_LINE_ID}":
+            return self._json(live_line())
+        if p.startswith("/api/pm-status/"):
+            return self._json({"line_id": LIVE_LINE_ID, "line_name": LINE["line_name"], "as_of": dt.date.today().isoformat(),
+                               "counts": {"overdue": 0, "due": 0, "ok": 0, "no_plan": 0}, "machines": []})
+        if p.startswith("/api/poka-yoke/sensor-health/") or p.startswith("/api/poka-yoke/sensor-sweep/"):
+            return self._json({"line_id": LIVE_LINE_ID, "health": "NO_PY",
+                               "counts": {"total": 0, "alive": 0, "stuck": 0, "unknown": 0}, "checks": []})
+        if p.startswith("/api/poka-yoke/bypass-episodes/"):
+            rd, sh = _live_pick(q)
+            return self._json({"line_id": LIVE_LINE_ID, "date": rd, "shift": sh, "episodes": [], "by_slot": {},
+                               "slot_summary": {}, "merge_gap_sec": 60})
+        if p.startswith("/api/poka-yoke/"):
+            return self._json([])
+        tail = "/".join(parts[4:])
+        if tail == "realtime":
+            return self._json(live_realtime(q))
+        if tail == "ct-history":
+            return self._json(live_ct_history(q))
+        if tail == "cycle-extremes":
+            return self._json(live_cycle_extremes(q))
+        if tail == "status-log":
+            return self._json(live_status_log(q))
+        if tail == "hourly-loss-breakdown":
+            return self._json(live_hourly_loss_breakdown(q))
+        if tail == "ct-histogram":
+            return self._json(live_ct_histogram(q))
+        if tail == "production_history":
+            return self._json(live_production_history())
+        if tail == "ng-list":
+            return self._json(live_ng_list(q))
+        if tail == "machines":
+            return self._json([{"id": 1, "machine_name": machine_cfg().get("machine_name"),
+                                "machine_seq": None, "parent_plc_id": None}])
+        if tail in ("cycle-video", "archive-video"):
+            try:
+                seq = int((q.get("cycle_seq") or [""])[0])
+            except ValueError:
+                return self._json({"detail": "cycle_seq required"}, 400)
+            full = CAMERA.clip_path(seq)
+            if not full:
+                return self._json({"detail": "No clip for this cycle"}, 404)
+            return self._file(full, cache="private, max-age=86400", extra={"X-Clip-Source": "archive", "X-Video-Offset": "0"})
+        if tail == "comments-history":
+            return self._json(comments_history())
+        if tail == "clip-prewarm":
+            return self._json({"ok": True, "queued": 0})
+        if len(parts) >= 7 and parts[4] == "cycles" and parts[6] == "comments":
+            pc, shift = unquote(parts[5]), (q.get("shift") or [""])[0]
+            store = _load("comments.json", {"comments": [], "remarks": []})
+            return self._json({"comments": [c for c in store["comments"]
+                                            if c["part_code"] == pc and (not shift or c.get("shift") == shift)]})
+        if len(parts) >= 6 and parts[4] == "ng-process-remarks":
+            pc = unquote(parts[5])
+            store = _load("comments.json", {"comments": [], "remarks": []})
+            return self._json({"remarks": [r for r in store["remarks"] if r["part_code"] == pc]})
+        return self._json({})
+
+    def _mjpeg(self):
+        """Live camera preview as multipart JPEG (an <img> plays it directly)."""
+        CAMERA.add_viewer()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            if self.command == "HEAD":
+                return
+            no, idle = -1, 0.0
+            while idle < 60:                      # give up after a minute without a frame
+                jpeg, no2 = CAMERA.wait_frame(no, 5.0)
+                if jpeg is None:
+                    idle += 5
+                    continue
+                idle, no = 0.0, no2
+                self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpeg)
+                                 + jpeg + b"\r\n")
+                self.wfile.flush()
+        except OSError:
+            pass                                  # viewer closed the preview
+        finally:
+            CAMERA.remove_viewer()
+
+    def _snapshot(self):
+        CAMERA.add_viewer()
+        try:
+            jpeg, _ = CAMERA.wait_frame(-1, 10.0)
+        finally:
+            CAMERA.remove_viewer()
+        if not jpeg:
+            return self._json({"detail": CAMERA.snapshot().get("last_error") or "No picture from the camera"}, 503)
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(jpeg)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(jpeg)
 
     def _static(self, path):
         rel = unquote(path).lstrip("/") or "index.html"
@@ -559,6 +987,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 obj = {**MACHINE_DEFAULTS, **_load("machine.json", {}), **body}
                 _save("machine.json", obj)
+            COLLECTOR.reload()                    # reconnect with the new PLC settings
             return self._json(obj)
         if p == "/api/demo/camera":
             with LOCK:
@@ -568,6 +997,7 @@ class Handler(BaseHTTPRequestHandler):
                     obj["password"] = stored.get("password", "")   # blank = keep the stored password
                 obj.pop("password_set", None)
                 _save("camera.json", obj)
+            CAMERA.reload()                       # restart the stream with the new camera settings
             out = {**obj, "password_set": bool(obj.get("password")), "password": ""}
             return self._json(out)
         return self._json({"ok": True})
@@ -591,6 +1021,16 @@ class Server(ThreadingHTTPServer):
 
 
 if __name__ == "__main__":
-    print(f"MES demo clone on http://0.0.0.0:{PORT}  (data: {RECORD_DATE} shift {SHIFT}, "
+    print(f"MES demo clone on http://0.0.0.0:{PORT}  (recorded data: {RECORD_DATE} shift {SHIFT}, "
           f"{len(CYCLES['machines'])} machines)", flush=True)
-    Server(("0.0.0.0", PORT), Handler).serve_forever()
+    m, c = machine_cfg(), camera_cfg()
+    print(f"Live data (MANAGEMENT-2): PLC {m.get('plc_ip')}:{m.get('plc_port')}, camera {c.get('ip')}, "
+          f"ffmpeg: {CAMERA.ffmpeg or 'NOT FOUND (no clips, snapshot preview only)'}", flush=True)
+    atexit.register(CAMERA.stop)              # never leave ffmpeg running after the server
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # stop.sh: exit through atexit
+    COLLECTOR.start()
+    CAMERA.start()
+    try:
+        Server(("0.0.0.0", PORT), Handler).serve_forever()
+    except KeyboardInterrupt:
+        pass

@@ -1,15 +1,20 @@
 # MES demo clone (port 5000)
 
-A standalone, no-login copy of three MES screens for demos. It has **no link to the
-live MES**: no database, no PLC, no camera, no calls to the MES ports. The live MES
-was only read once, to copy the demo data.
+A standalone, no-login copy of MES screens for demos. It has **no link to the live MES**:
+no database, no calls to the MES ports. The live MES was only read once, to copy the demo data.
+
+Two kinds of data:
+- **Recorded** (SUPERVISOR, MANAGEMENT): one recorded YCA-SS shift, replayed.
+- **Live** (MANAGEMENT-2): the demo machine's own PLC and camera, read by this server
+  (see [Live data](#live-data-management-2)).
 
 | Page | URL |
 |---|---|
 | Supervisor Dashboard | `http://<server>:5000/YCA-SS/SUPERVISOR` |
-| Management Dashboard (Final Inspection) | `http://<server>:5000/YCA-SS/MANAGEMENT` |
-| Machine Config (one FX5U machine) | `http://<server>:5000/machine-config` |
-| Camera Setting (one camera) | `http://<server>:5000/camera` |
+| Management Dashboard (Final Inspection, recorded) | `http://<server>:5000/YCA-SS/MANAGEMENT` |
+| Management Dashboard 2 (**live** PLC + camera) | `http://<server>:5000/YCA-SS/MANAGEMENT-2` |
+| Machine Config (one FX5U machine) + ④ Collector Data | `http://<server>:5000/machine-config` |
+| Camera Setting (one camera) + live preview | `http://<server>:5000/camera` |
 
 ## Data
 - `data/cycles.json` — YCA-SS (line 12) Final Inspection, 2026-10-08 shift A, cycles #1600-#1699.
@@ -21,14 +26,58 @@ was only read once, to copy the demo data.
 - `data/mgmt/` — YCA-SS line config (no PLC addresses), production history, 30-day CT histogram, PM status.
 - `data/machine.json`, `data/camera.json` — what the config pages save.
 - `data/comments.json` — comments typed on cycle videos.
+- `data/live/` — live cycles and status timeline from the PLC, one JSON-lines file per shift.
+- `clips/live/cycle_<seq>.mp4` — one clip per live cycle (`clips/live/seg/` holds the last 3 minutes of raw recording).
 
 ## Run
+Linux:
+
     ./start.sh        # builds the frontend if needed, starts on port 5000
     ./stop.sh
 
-Rebuild after a frontend change: `npx vite build`, then reload the page.
+Windows (PowerShell, in the repo folder):
 
-## Management dashboard
+    npm install
+    .\start.bat      # builds the frontend if needed, then runs: python server.py
+                      # stop with Ctrl+C
+
+Rebuild after a frontend change: `npx vite build`, then reload the page.
+Needs Python 3.8+ (standard library only) and, for live cycle clips, **ffmpeg**
+(Windows: `winget install Gyan.FFmpeg`, then open a new terminal). The server prints
+whether it found ffmpeg when it starts.
+
+## Live data (MANAGEMENT-2)
+MANAGEMENT-2 uses its own line id (99), so every `/api/lines/99/...` call is answered from
+the live collector instead of the recorded shift. MANAGEMENT stays on the recorded data.
+The server PC must be on the machine network (192.168.30.x).
+
+**PLC — `collector.py` + `slmp.py`** (settings: Machine Config page)
+- Mitsubishi FX5U, SLMP binary 3E (or 4E) over TCP, default `192.168.30.10:5000`.
+  In GX Works3 the built-in Ethernet port needs an *SLMP connection* (TCP, port 5000, binary).
+- **Read only** — nothing is ever written to the PLC.
+- Cycles: count mode *bit* = a rising edge on the OK bit (L108) or NG bit (L109), ignoring
+  edges closer than "OK/NG pulse min gap"; mode *register* = the OK/NG counters (D101/D102) going up.
+  CT = time since the previous OK/NG signal. The first cycle of a shift (or after a stop longer
+  than "max allowed cycle") has no known CT, so it is counted at the max allowed cycle time (marked `*`).
+- Status word (D100) is mapped through the line's status codes (0 IDLE, 1 RUNNING, 2 BREAKDOWN, …)
+  into the shift timeline and loss times. If it is missing, RUNNING/IDLE is derived from the cycles.
+  `PLC OFFLINE` is logged while the PLC can't be reached.
+- Shifts and hourly slots come from `data/mgmt/line.json`. Cycles made in a gap after a shift (OT) count
+  for that shift. Plan = working time so far ÷ the machine's ideal CT (Machine Config).
+- Data registers and digital inputs from "Monitor Config" are read every second and shown in
+  **Collector Data** (Machine Config tab ④, and the 📡 COLLECTOR button on MANAGEMENT-2).
+
+**Camera — `camera.py`** (settings: Camera page)
+- Panasonic RTSP, default `rtsp://admin:<password>@192.168.30.20:554/MediaInput/h264` (stream 1).
+  The stream must be **H.264** (browsers can't play H.265 clips).
+- One ffmpeg process keeps one RTSP session: it records 4 s segments (stream copy, no re-encode)
+  and feeds the live preview (5 fps JPEG). For each cycle the clip = cycle + pre/post roll is cut
+  from the segments into `clips/live/cycle_<seq>.mp4`; MANAGEMENT-2 plays it like the recorded clips.
+- Recording OFF: no clips; the preview opens the stream only while someone is watching.
+- Without ffmpeg: the preview falls back to the camera's HTTP snapshot (`/cgi-bin/camera`), no clips.
+- Live preview: Camera page → Preview → Live, or the 📷 CAMERA button on MANAGEMENT-2.
+
+## Management dashboard (recorded)
 Replays the same recorded shift: the page clock is pinned to 2026-10-08 16:49 (shift A), so plan,
 timeline and hourly slots match the recorded Final Inspection cycles (realtime is computed from them).
 Static extras live in `data/mgmt/` (line config without PLC addresses, PY list, PM status, 30-day CT histogram).

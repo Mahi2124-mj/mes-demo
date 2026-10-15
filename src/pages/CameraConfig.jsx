@@ -8,10 +8,12 @@
 // This page talks ONLY to the demo server's own endpoints:
 //   GET/PUT /api/demo/camera             camera config object
 //   GET     /api/demo/camera/sample-clip recorded sample clip (video/mp4)
-// It never opens a connection to a camera or PLC.
+//   GET     /api/demo/camera/live.mjpg   live preview (via LivePanels)
+// The demo server (camera.py) opens the RTSP stream; the browser never talks to the camera.
 import { useState, useEffect, useMemo, useCallback } from "react";
 import PageTopbar from "../components/PageTopbar";
 import { COLORS, pageWrap } from "../components/whiteTheme";
+import { CameraLive, useCollector } from "../components/LivePanels";
 
 const API_CAMERA = "/api/demo/camera";
 const SAMPLE_CLIP = "/api/demo/camera/sample-clip";
@@ -19,9 +21,9 @@ const SAMPLE_CLIP = "/api/demo/camera/sample-clip";
 export const DEFAULTS = {
   camera_id: "CAM-01",
   name: "Station camera",
-  ip: "",
+  ip: "192.168.30.20",
   port: 554,
-  rtsp_path: "/Streaming/Channels/101",
+  rtsp_path: "/MediaInput/h264",            // Panasonic, stream 1
   username: "admin",
   password: "",
   assigned_machine: "Nut-Runner Demo Station",
@@ -361,6 +363,9 @@ export default function CameraConfig() {
   const [saving, setSaving] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [clipErr, setClipErr] = useState(false);
+  const [previewTab, setPreviewTab] = useState("live");   // "live" | "sample"
+  const { data: live } = useCollector(2000);
+  const camState = live?.camera?.state;
 
   useEffect(() => { document.title = "Camera Configuration"; }, []);
 
@@ -469,8 +474,8 @@ export default function CameraConfig() {
                   : <Pill label="Saved" color="green" />)}
             </div>
             <div style={{ fontSize: 11, color: COLORS.textMut, marginTop: 2, maxWidth: 760, lineHeight: 1.5 }}>
-              Camera that records cycle clips for the demo station. Settings are stored by the demo server only;
-              this page never connects to the camera.
+              Camera that records cycle clips for the demo station. The demo server connects to it for the live
+              preview and records one clip per PLC cycle (shown on MANAGEMENT-2).
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{actions}</div>
@@ -521,7 +526,11 @@ export default function CameraConfig() {
                       </span>
                     </td>
                     <td style={TD}><Pill label={savedRecOn ? "ON" : "OFF"} color={savedRecOn ? "green" : "gray"} /></td>
-                    <td style={TD}><Pill label="Config only" color="blue" /></td>
+                    <td style={TD}>
+                      <Pill label={{ streaming: "Live", connecting: "Connecting", error: "Not connected", idle: "Idle",
+                                     not_configured: "IP not set", no_ffmpeg: "No ffmpeg" }[camState] || "…"}
+                            color={camState === "streaming" ? "green" : camState === "error" ? "red" : camState === "idle" ? "gray" : "amber"} />
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -536,11 +545,11 @@ export default function CameraConfig() {
 
             {!ipSet ? (
               <Notice tone="amber" style={{ marginBottom: 18 }}>
-                <strong>Set the camera's IP.</strong> This demo never connects to the camera — production cameras allow only one stream session.
+                <strong>Set the camera's IP.</strong> The demo server needs it for the live preview and cycle clips.
               </Notice>
             ) : (
               <Notice tone="blue" style={{ marginBottom: 18 }}>
-                This demo never connects to the camera — production cameras allow only one stream session.
+                The demo server keeps one RTSP stream open to this camera; it feeds both the live preview and the cycle clips.
               </Notice>
             )}
 
@@ -587,9 +596,9 @@ export default function CameraConfig() {
                 <Input id="cc-port" type="number" min={1} max={65535} step={1} value={form.port}
                        onChange={e => set("port", e.target.value)} onBlur={touch("port")} invalid={!!errOf("port")} style={monoInput} />
               </FF>
-              <FF label="RTSP Path" error={errOf("rtsp_path")} hint="Main stream path" htmlFor="cc-path">
+              <FF label="RTSP Path" error={errOf("rtsp_path")} hint="Panasonic: /MediaInput/h264 (stream 1)" htmlFor="cc-path">
                 <Input id="cc-path" value={form.rtsp_path} onChange={e => set("rtsp_path", e.target.value)} onBlur={touch("rtsp_path")}
-                       placeholder="/Streaming/Channels/101" invalid={!!errOf("rtsp_path")} spellCheck={false} style={monoInput} />
+                       placeholder="/MediaInput/h264" invalid={!!errOf("rtsp_path")} spellCheck={false} style={monoInput} />
               </FF>
               <FF label="Assigned Machine *" error={errOf("assigned_machine")} htmlFor="cc-mach">
                 <Select id="cc-mach" value={form.assigned_machine} onChange={e => set("assigned_machine", e.target.value)} invalid={!!errOf("assigned_machine")}>
@@ -614,27 +623,46 @@ export default function CameraConfig() {
           </Card>
 
           <Card className="cc-card">
-            <CardTitle title="Preview" sub="Playback of a clip already recorded by the demo server." />
-            <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#0f172a", borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
-              {!clipErr ? (
-                <video
-                  controls preload="metadata" playsInline muted
-                  src={SAMPLE_CLIP}
-                  onError={() => setClipErr(true)}
-                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", background: "#0f172a", display: "block" }}
-                />
-              ) : (
-                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: "#94a3b8", textAlign: "center", padding: 16 }}>
-                  <div style={{ fontSize: 34, opacity: .35 }}>▶</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#cbd5e1" }}>Sample clip not available</div>
-                  <div style={{ fontSize: 11 }}>The demo server has no recorded clip to play.</div>
+            <CardTitle title="Preview" sub="Live picture from the camera, or a clip already recorded by the demo server."
+              right={
+                <div style={{ display: "inline-flex", border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                  {[["live", "Live"], ["sample", "Recorded clip"]].map(([k, label]) => (
+                    <button key={k} type="button" onClick={() => setPreviewTab(k)}
+                      style={{ padding: "5px 12px", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700,
+                               background: previewTab === k ? "#1e40af" : "#f8fafc", color: previewTab === k ? "#fff" : "#334155" }}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>Recorded sample clip (not a live stream)</span>
-              <Pill label="Recorded" color="gray" />
-            </div>
+              } />
+            {previewTab === "live" ? (
+              savedIp ? <CameraLive /> : (
+                <Notice tone="amber">Save the camera's IP first; the live preview uses the saved settings.</Notice>
+              )
+            ) : (
+              <>
+                <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#0f172a", borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+                  {!clipErr ? (
+                    <video
+                      controls preload="metadata" playsInline muted
+                      src={SAMPLE_CLIP}
+                      onError={() => setClipErr(true)}
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", background: "#0f172a", display: "block" }}
+                    />
+                  ) : (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: "#94a3b8", textAlign: "center", padding: 16 }}>
+                      <div style={{ fontSize: 34, opacity: .35 }}>▶</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#cbd5e1" }}>Sample clip not available</div>
+                      <div style={{ fontSize: 11 }}>The demo server has no recorded clip to play.</div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>Recorded sample clip (not a live stream)</span>
+                  <Pill label="Recorded" color="gray" />
+                </div>
+              </>
+            )}
             <div style={{ marginTop: 14, padding: "10px 12px", background: "#f8fafc", border: "1px solid #f1f5f9", borderRadius: 9, fontSize: 11, color: "#64748b", lineHeight: 1.7 }}>
               <div><span style={{ color: "#94a3b8" }}>Camera:</span> <b style={{ color: "#0f172a" }}>{saved.name || "—"}</b> <span style={{ fontFamily: "monospace", color: "#7c3aed" }}>{saved.camera_id}</span></div>
               <div><span style={{ color: "#94a3b8" }}>Machine:</span> <b style={{ color: "#0f172a" }}>{saved.assigned_machine || "—"}</b></div>
@@ -690,7 +718,7 @@ export default function CameraConfig() {
           <Card className="cc-card">
             <CardTitle title="Clip settings" sub="Where cycle clips are saved and how long they are kept." />
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <FF label="Video save path *" error={errOf("video_save_path")} hint="Clips save as path/Line/Machine/Date/Shift/cycle.mp4" htmlFor="cc-vpath">
+              <FF label="Video save path *" error={errOf("video_save_path")} hint="Cycle clips save as <path>/live/cycle_<no>.mp4 on the demo server PC" htmlFor="cc-vpath">
                 <Input id="cc-vpath" value={form.video_save_path} onChange={e => set("video_save_path", e.target.value)} onBlur={touch("video_save_path")}
                        placeholder="/home/server/mes-demo-5000/clips" invalid={!!errOf("video_save_path")} spellCheck={false} style={monoInput} />
               </FF>
