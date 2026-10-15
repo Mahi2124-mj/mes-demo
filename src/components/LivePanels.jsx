@@ -152,7 +152,8 @@ export function CameraLive({ dark = false }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
         <Chip label={st.label} color={st.color} />
-        {cam && <Chip label={cam.recording ? "Recording ON" : "Recording OFF"} color={cam.recording ? "#16a34a" : "#94a3b8"} />}
+        {cam && <Chip label={cam.recording ? "Recording ON" : cam.recording_enabled ? "Recording ON: waiting for camera" : "Recording OFF"}
+                      color={cam.recording ? "#16a34a" : cam.recording_enabled ? "#d97706" : "#94a3b8"} />}
         {cam && cam.ip && <span style={{ fontSize: 11, color: c.sub, fontFamily: "monospace" }}>{cam.rtsp_url}</span>}
         <button type="button" onClick={() => { setLoaded(false); setNonce(Date.now()); }}
           style={{ marginLeft: "auto", padding: "4px 12px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.deep,

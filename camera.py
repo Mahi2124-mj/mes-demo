@@ -11,11 +11,15 @@ When recording is OFF, the preview still works: ffmpeg is started only while
 someone is watching.  Without ffmpeg installed, the preview falls back to the
 camera's HTTP snapshot (SNAPSHOT_PATHS) and no clips are recorded.
 """
+import base64
 import bisect
 import datetime as dt
+import hashlib
 import os
 import queue
+import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -62,6 +66,82 @@ def rtsp_url(cfg, hide_password=False):
     return f"rtsp://{auth}{str(cfg.get('ip') or '').strip()}:{int(cfg.get('port') or 554)}{path}"
 
 
+def rtsp_describe(cfg, timeout=4.0):
+    """Ask the camera for the configured stream once (RTSP DESCRIBE, Basic or Digest auth)
+    and return its status line, e.g. "200 OK" or "454 Session Not Found"."""
+    ip, port = str(cfg.get("ip") or "").strip(), int(cfg.get("port") or 554)
+    path = str(cfg.get("rtsp_path") or "").strip() or "/"
+    url = f"rtsp://{ip}:{port}{path if path.startswith('/') else '/' + path}"
+    user, pw = str(cfg.get("username") or ""), str(cfg.get("password") or "")
+
+    def ask(cseq, auth=None):              # a fresh connection per request: some cameras hang up after a 401
+        with socket.create_connection((ip, port), timeout=timeout) as s:
+            s.settimeout(timeout)
+            msg = f"DESCRIBE {url} RTSP/1.0\r\nCSeq: {cseq}\r\nAccept: application/sdp\r\nUser-Agent: mes-demo\r\n"
+            s.sendall((msg + (f"Authorization: {auth}\r\n" if auth else "") + "\r\n").encode())
+            buf = b""
+            while b"\r\n\r\n" not in buf and len(buf) < 65536:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+        lines = buf.split(b"\r\n\r\n")[0].decode("latin-1").split("\r\n")
+        status = lines[0].split(" ", 1)[1] if " " in lines[0] else lines[0] or "no answer"
+        return status, [l.split(":", 1)[1].strip() for l in lines[1:] if l.lower().startswith("www-authenticate:")]
+
+    status, challenges = ask(1)
+    if status.startswith("401") and user:
+        digest = next((c for c in challenges if c.lower().startswith("digest")), None)
+        if digest:
+            p = {k: a or b for k, a, b in re.findall(r'(\w+)=(?:"([^"]*)"|([^,\s]*))', digest[6:])}
+            md5 = lambda x: hashlib.md5(x.encode()).hexdigest()  # noqa: E731
+            realm, nonce = p.get("realm", ""), p.get("nonce", "")
+            ha1, ha2 = md5(user + ":" + realm + ":" + pw), md5("DESCRIBE:" + url)
+            auth = f'Digest username="{user}", realm="{realm}", nonce="{nonce}", uri="{url}"'
+            if "auth" in p.get("qop", ""):
+                cnonce = os.urandom(8).hex()
+                resp = md5(":".join((ha1, nonce, "00000001", cnonce, "auth", ha2)))
+                auth += f', qop=auth, nc=00000001, cnonce="{cnonce}", response="{resp}"'
+            else:
+                auth += f', response="{md5(ha1 + ":" + nonce + ":" + ha2)}"'
+        else:
+            auth = "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
+        status, _ = ask(2, auth)
+    return status
+
+
+RTSP_HINTS = (
+    ("401", "wrong username or password (Camera page)"),
+    ("403", "the camera does not allow this user to view the stream"),
+    ("404", "the camera has no stream at this RTSP Path — check the path"),
+    ("453", "the camera has no free stream session (an NVR/recorder is using them all)"),
+    ("454", "the camera rejected the session — check the RTSP Path"),
+    ("461", "the camera does not accept RTSP over TCP"),
+)
+
+
+def explain_rtsp(status, path):
+    hint = next((h for code, h in RTSP_HINTS if status.startswith(code)), "check the RTSP Path and the camera's stream settings")
+    return f"Camera answered RTSP {status} for {path or '/'}: {hint}"
+
+
+def explain_ffmpeg(line, cfg):
+    """ffmpeg's network errors in plain words."""
+    where = f"{cfg.get('ip')}:{cfg.get('port') or 554}"
+    low = line.lower()
+    if "connection refused" in low or "actively refused" in low:
+        return f"Nothing listens on {where} (wrong RTSP port?)"
+    if "no route to host" in low or "unreachable" in low:
+        return f"The camera at {where} is not reachable from this PC (network/IP)"
+    if "timed out" in low or "did not properly respond" in low:
+        return f"No answer from the camera at {where} (IP not reachable from this PC?)"
+    if "401" in line:
+        return explain_rtsp("401 Unauthorized", cfg.get("rtsp_path"))
+    if "404" in line:
+        return explain_rtsp("404 Not Found", cfg.get("rtsp_path"))
+    return line
+
+
 class Camera:
     def __init__(self, get_cfg, default_clips_dir, here):
         self.get_cfg = get_cfg
@@ -79,6 +159,7 @@ class Camera:
         self.seg_seen = {}                   # segment file -> wall time it appeared (its first frame's arrival)
         self.launches = []                   # wall times the recording ffmpeg was (re)started
         self.demo = None                     # None | "camera" (record the real camera) | "synthetic" (test pattern)
+        self.rtsp_diag = {}                  # cfg_version -> plain-words RTSP answer for ffmpeg's "4XX" errors
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
                      "last_clip_error": None, "source": None}
@@ -305,11 +386,35 @@ class Camera:
         for raw in proc.stderr:
             line = raw.decode("utf-8", "replace").strip()
             if line:
+                cfg = self.get_cfg()
                 # Never show the camera password from the URL in the UI.
-                pw = str(self.get_cfg().get("password") or "")
+                pw = str(cfg.get("password") or "")
                 if pw:
                     line = line.replace(urllib.parse.quote(pw, safe=""), "****").replace(pw, "****")
+                if self.demo != "synthetic":
+                    if "Server returned 4XX" in line or "Server returned 5XX" in line:
+                        line = self._diagnose(cfg) or line
+                    else:
+                        line = explain_ffmpeg(line, cfg)
                 self._set(last_error=line[:300], state="error" if self.frame_at == 0 else self.info["state"])
+
+    def _diagnose(self, cfg):
+        """ffmpeg only says "4XX Client Error": ask the camera ourselves for the exact RTSP answer
+        (once per settings version, in the background)."""
+        version = self.cfg_version
+        if version in self.rtsp_diag:
+            return self.rtsp_diag[version]
+        self.rtsp_diag[version] = None
+
+        def probe():
+            try:
+                msg = explain_rtsp(rtsp_describe(cfg), cfg.get("rtsp_path"))
+            except OSError as e:
+                msg = explain_ffmpeg(str(e), cfg)
+            self.rtsp_diag[version] = msg
+            self._set(last_error=msg)
+        threading.Thread(target=probe, daemon=True).start()
+        return None
 
     def _snapshots(self):
         """No ffmpeg: poll the camera's HTTP snapshot while someone is watching."""

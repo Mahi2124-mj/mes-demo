@@ -692,7 +692,8 @@ def collector_view():
                   "ok": sum(1 for c in cyc if not c["is_ng"]), "ng": sum(1 for c in cyc if c["is_ng"]),
                   "total": len(cyc)},
         "recent_cycles": recent,
-        "camera": {**cam, "ip": camera_cfg().get("ip"), "name": camera_cfg().get("name")},
+        "camera": {**cam, "ip": camera_cfg().get("ip"), "name": camera_cfg().get("name"),
+                   "recording_enabled": bool(camera_cfg().get("recording_enabled"))},
         "demo": DEMO.snapshot(),
         "server_time": dt.datetime.now().isoformat(timespec="seconds"),
     }
