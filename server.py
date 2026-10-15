@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from camera import Camera
 from collector import OFFLINE, Collector, LiveStore, ShiftClock
+from demo_plc import COLLECTOR_SETTINGS as DEMO_PLC_SETTINGS, DemoPlc, demo_cycle_times
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,7 +57,8 @@ MACHINE_DEFAULTS = {
     "plc_ip": "192.168.30.10", "plc_port": 5000, "protocol": "SLMP 3E (binary)", "count_mode": "bit",
     "ok_bit_address": "L108", "ng_bit_address": "L109", "ok_data_register": "D101",
     "ng_data_register": "D102", "shift_reset_bit": "L110", "status_address": "D100",
-    "ideal_cycle_time": 20.0, "max_allowed_cycle": 40.0, "ok_ng_pulse_min_gap": 0.5,
+    "ideal_cycle_time": 10.0, "max_allowed_cycle": 40.0, "ok_ng_pulse_min_gap": 0.5,
+    "ct_register": "D103", "ct_register_scale": 0.1,     # PLC-measured cycle time (blank = time between signals)
     "nf2_camera_id": "CAM-01", "machine_seq": 0,
     # Same lists the Machine Config page starts from; the collector reads these too.
     "monitor_registers": [
@@ -428,13 +430,17 @@ def live_realtime(q):
     run_s = sum(c["ct"] for c in cyc)
     segs = _live_segments(rd, sh, w0, now) if w0 else []
     loss_types = _live_loss_types()
-    loss = {}
+    loss, offline_s = {}, 0.0
     for s, e, st in segs:
         lt = loss_types.get(st)
         if lt:
             loss[lt] = loss.get(lt, 0.0) + (e - s).total_seconds()
-    window_s = max(1.0, ((now - w0).total_seconds() if w0 else 0.0) - loss.get("break", 0.0))
-    speed_loss = sum(max(0.0, c["ct"] - ideal) for c in cyc)
+        elif st == OFFLINE:
+            offline_s += (e - s).total_seconds()
+    # Breaks and time without PLC data (collector not connected) are not counted against availability.
+    window_s = max(1.0, ((now - w0).total_seconds() if w0 else 0.0) - loss.get("break", 0.0) - offline_s)
+    # Net speed loss: a slow cycle adds (CT - ideal), a fast one takes it back, so it can go negative.
+    speed_loss = sum(c["ct"] - ideal for c in cyc)
     avail = min(100.0, 100.0 * run_s / window_s) if w0 else 0.0
     perf = min(100.0, 100.0 * (run_s - speed_loss) / run_s) if run_s else 0.0
     qual = 100.0 * ok / len(cyc) if cyc else 0.0
@@ -469,12 +475,15 @@ def live_realtime(q):
         rt[f"ct{i + 1}"] = v
     rt["ct_avg_20"] = round(sum(newest) / len(newest), 2) if newest else None
     plan_done = 0
+    offline = [(s, e) for s, e, st in segs if st == OFFLINE]
     for sl in _live_slots(rd, sh):
         s0, s1 = _live_slot_bounds(rd, sh, sl)
         inside = [c for c in cyc if s0 <= dt.datetime.fromisoformat(c["ts"]) < s1]
         full = float(sl.get("working_minutes") or (s1 - s0).total_seconds() / 60) * 60 / ideal
         lo, hi = max(s0, w0) if w0 else s1, min(s1, now)
-        plan = int(full * max(0.0, (hi - lo).total_seconds()) / (s1 - s0).total_seconds())
+        # plan accrues only while there is PLC data (same rule as availability)
+        no_data = sum(max(0.0, (min(e, hi) - max(s, lo)).total_seconds()) for s, e in offline)
+        plan = int(full * max(0.0, (hi - lo).total_seconds() - no_data) / (s1 - s0).total_seconds())
         plan_done += plan
         sok = sum(1 for c in inside if not c["is_ng"])
         pre = sl["db_column_prefix"]
@@ -497,7 +506,7 @@ def live_hourly_loss_breakdown(q):
         s0, s1 = _live_slot_bounds(rd, sh, sl)
         row = {"slot_label": sl["slot_label"], "start": sl["start_time"][:5], "end": sl["end_time"][:5],
                **dict.fromkeys(keys, 0)}
-        row["loss_speed"] = round(sum(max(0.0, c["ct"] - ideal) for c in cyc
+        row["loss_speed"] = round(sum(c["ct"] - ideal for c in cyc
                                       if s0 <= dt.datetime.fromisoformat(c["ts"]) < s1))
         if w0:
             for s, e, st in _live_segments(rd, sh, max(s0, w0), min(s1, now)):
@@ -533,22 +542,6 @@ def live_status_log(q):
     rd, sh = _live_pick(q)
     return [{"ts": e["ts"], "nowMinFrac": e["nowMinFrac"], "status": e["status"], "shift": sh}
             for e in STORE.status_log(rd, sh)]
-
-
-def live_ct_histogram(q):
-    try:
-        days = max(1, min(365, int((q.get("days") or ["30"])[0])))
-    except ValueError:
-        days = 30
-    since = (dt.date.today() - dt.timedelta(days=days - 1)).isoformat()
-    buckets = {}
-    for c in STORE.all_cycles(since):
-        b = round(c["ct"], 1)
-        buckets[b] = buckets.get(b, 0) + 1
-    rows = [{"ct": k, "count": v} for k, v in sorted(buckets.items())]
-    peak = max(rows, key=lambda r: r["count"]) if rows else {"ct": None, "count": 0}
-    return {"total_cycles": sum(buckets.values()), "peak_bucket": peak["ct"], "peak_count": peak["count"],
-            "buckets": rows, "window_days": days}
 
 
 def live_production_history():
@@ -590,6 +583,88 @@ def live_line():
                            "max_allowed_cycle": cfg.get("max_allowed_cycle")}}
 
 
+class DemoRun:
+    """'Run demo' on the Collector panel: wipe the live data, then let the demo PLC play N cycles
+    (ideal CT ± a mix) through the normal collector -> camera -> dashboard path."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.plc = None
+        self.info = {"state": "idle", "total": 0, "done": 0, "last_ct": None, "camera": None, "error": None}
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.info)
+
+    def _set(self, **kw):
+        with self.lock:
+            self.info.update(kw)
+
+    def start(self, n):
+        with self.lock:
+            if self.info["state"] in ("starting", "running", "finishing"):
+                return False
+            self.info = {"state": "starting", "total": n, "done": 0, "last_ct": None, "camera": None, "error": None}
+        threading.Thread(target=self._run, args=(n,), name="demo-run", daemon=True).start()
+        return True
+
+    def stop(self):
+        if self.plc:
+            self.plc.stop()
+
+    def _wait(self, cond, timeout):
+        end = time.time() + timeout
+        while time.time() < end:
+            if cond():
+                return True
+            if self.plc and self.plc.stopped.is_set():
+                return False
+            time.sleep(0.2)
+        return False
+
+    def _run(self, n):
+        ideal = _live_ideal()
+        self.plc = DemoPlc()
+        try:
+            port = self.plc.start()
+            # Real camera if it is streaming, else a generated test picture (needs ffmpeg either way).
+            cam_mode = "camera" if CAMERA.snapshot().get("state") == "streaming" else "synthetic"
+            if not CAMERA.ffmpeg:
+                cam_mode = None
+            COLLECTOR.set_override({**DEMO_PLC_SETTINGS, "plc_port": port})
+            COLLECTOR.reset_data()
+            CAMERA.reset_clips()
+            if cam_mode:
+                CAMERA.set_demo(cam_mode)
+            self._set(camera=cam_mode or "none (ffmpeg not found)")
+            if not self._wait(lambda: COLLECTOR.snapshot().get("state") == "connected", 15):
+                raise RuntimeError("the collector did not connect to the demo PLC")
+            if cam_mode:
+                if not self._wait(lambda: CAMERA.snapshot().get("recording"), 30):
+                    raise RuntimeError(CAMERA.snapshot().get("last_error") or "the camera recording did not start")
+                time.sleep(5)            # recording must cover the first cycle's start and pre-roll
+            self._set(state="running")
+            cts = demo_cycle_times(n, ideal)
+            finished = self.plc.play(cts, ideal, on_cycle=lambda i, ct: self._set(done=i, last_ct=ct))
+            self._set(state="finishing")
+            if finished:
+                post = float(camera_cfg().get("post_roll_s") or 0)
+                time.sleep(post + 6)     # let the last clip be cut before the camera goes back
+            self._set(state="done" if finished else "stopped")
+        except Exception as e:  # noqa: BLE001
+            if self.plc.stopped.is_set():
+                self._set(state="stopped")
+            else:
+                self._set(state="error", error=str(e))
+        finally:
+            COLLECTOR.set_override(None)
+            CAMERA.set_demo(None)
+            self.plc.stop()
+
+
+DEMO = DemoRun()
+
+
 def collector_view():
     """Everything the 'Collector data' panels show, in one poll."""
     rd, sh, in_gap = CLOCK.at(dt.datetime.now())
@@ -599,15 +674,19 @@ def collector_view():
     recent = []
     for c in reversed(cyc[-25:]):
         recent.append({**c, "clip": CAMERA.clip_path(c["cycle_seq"]) is not None})
+    cfg = {**cfg, **(COLLECTOR.override or {})}      # demo run: show the demo PLC's address
     return {
         "plc": {**COLLECTOR.snapshot(), "plc_ip": cfg.get("plc_ip"), "plc_port": cfg.get("plc_port"),
                 "protocol": cfg.get("protocol"), "count_mode": cfg.get("count_mode"),
-                "machine_name": cfg.get("machine_name"), "status": COLLECTOR.current_status()},
+                "machine_name": cfg.get("machine_name"), "status": COLLECTOR.current_status(),
+                "ideal_cycle_time": _live_ideal(), "ct_register": cfg.get("ct_register"),
+                "demo_plc": COLLECTOR.override is not None},
         "shift": {"record_date": rd, "shift_name": sh, "in_gap": in_gap,
                   "ok": sum(1 for c in cyc if not c["is_ng"]), "ng": sum(1 for c in cyc if c["is_ng"]),
                   "total": len(cyc)},
         "recent_cycles": recent,
         "camera": {**cam, "ip": camera_cfg().get("ip"), "name": camera_cfg().get("name")},
+        "demo": DEMO.snapshot(),
         "server_time": dt.datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -854,8 +933,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(live_status_log(q))
         if tail == "hourly-loss-breakdown":
             return self._json(live_hourly_loss_breakdown(q))
-        if tail == "ct-histogram":
-            return self._json(live_ct_histogram(q))
+        if tail == "ct-histogram":             # kept as before: the line's recorded 30-day distribution
+            return self._json(_load("mgmt/ct-histogram.json", {"total_cycles": 0, "buckets": []}))
         if tail == "production_history":
             return self._json(live_production_history())
         if tail == "ng-list":
@@ -950,6 +1029,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         p = urlparse(self.path).path.rstrip("/")
         parts, body = p.split("/"), self._body()
+        if p == "/api/demo/run-demo":
+            if body.get("stop"):
+                DEMO.stop()
+                return self._json(DEMO.snapshot())
+            try:
+                n = max(1, min(200, int(body.get("cycles") or 30)))
+            except (TypeError, ValueError):
+                return self._json({"detail": "cycles must be a number"}, 400)
+            if not DEMO.start(n):
+                return self._json({"detail": "A demo is already running"}, 409)
+            return self._json(DEMO.snapshot())
         if p.startswith("/api/lines/") and len(parts) >= 7 and parts[4] == "cycles" and parts[6] == "comments":
             text = str(body.get("comment") or "").strip()
             if not text:

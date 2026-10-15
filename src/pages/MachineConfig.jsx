@@ -40,7 +40,9 @@ const DEFAULTS = {
   ng_data_register: "D102",
   shift_reset_bit: "L110",
   status_address: "D100",
-  ideal_cycle_time: 20.0,
+  ct_register: "D103",          // PLC-measured cycle time; blank = time between OK/NG signals
+  ct_register_scale: 0.1,
+  ideal_cycle_time: 10.0,
   max_allowed_cycle: 40.0,
   ok_ng_pulse_min_gap: 0.5,
   nf2_camera_id: "CAM-01",
@@ -135,6 +137,8 @@ function toPayload(f) {
     ng_data_register:    up(f.ng_data_register),
     shift_reset_bit:     up(f.shift_reset_bit),
     status_address:      up(f.status_address),
+    ct_register:         up(f.ct_register),
+    ct_register_scale:   toNum(f.ct_register_scale),
     ideal_cycle_time:    toNum(f.ideal_cycle_time),
     max_allowed_cycle:   toNum(f.max_allowed_cycle),
     ok_ng_pulse_min_gap: toNum(f.ok_ng_pulse_min_gap),
@@ -206,6 +210,8 @@ function validate(f) {
   put("ok_bit_address", deviceError(f.ok_bit_address, { kind: "bit" }));
   put("ng_bit_address", deviceError(f.ng_bit_address, { kind: "bit" }));
   put("status_address", deviceError(f.status_address, { kind: "word" }));
+  put("ct_register", deviceError(f.ct_register, { kind: "word", required: false }));
+  if (str(f.ct_register).trim()) put("ct_register_scale", numberError(f.ct_register_scale));
   if (f.count_mode === "register") {
     put("ok_data_register", deviceError(f.ok_data_register, { kind: "word" }));
     put("ng_data_register", deviceError(f.ng_data_register, { kind: "word" }));
@@ -782,6 +788,10 @@ export default function MachineConfig() {
                     {field("ok_bit_address", "OK Bit Address", { upper: true, placeholder: "e.g. L108" })}
                     {field("ng_bit_address", "NG Bit Address", { upper: true, placeholder: "e.g. L109" })}
                     {field("status_address", "Status Address", { upper: true, placeholder: "e.g. D100" })}
+                    {field("ct_register", "Cycle Time Register", { upper: true, placeholder: "e.g. D103 (blank = measure)",
+                      hint: "PLC's last cycle time, read on each OK/NG signal. Blank: time between signals." })}
+                    {field("ct_register_scale", "Cycle Time Unit (s per count)", { type: "number", step: "0.001", min: 0,
+                      hint: "0.1 = register holds 0.1 s (245 → 24.5 s)" })}
                   </div>
 
                   {/* OK / NG count mode: bit edge OR D-register mirror */}

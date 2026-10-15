@@ -57,15 +57,27 @@ The server PC must be on the machine network (192.168.30.x).
 - **Read only** — nothing is ever written to the PLC.
 - Cycles: count mode *bit* = a rising edge on the OK bit (L108) or NG bit (L109), ignoring
   edges closer than "OK/NG pulse min gap"; mode *register* = the OK/NG counters (D101/D102) going up.
-  CT = time since the previous OK/NG signal. The first cycle of a shift (or after a stop longer
-  than "max allowed cycle") has no known CT, so it is counted at the max allowed cycle time (marked `*`).
+- CT = the PLC's own "cycle time register" (default D103, 0.1 s units), read on each OK/NG signal.
+  If it is blank or 0: the time since the previous OK/NG signal; the first cycle of a shift then has no
+  known CT and is counted at the max allowed cycle time. CTs above the max allowed cycle are capped (`*`).
+- Ideal CT (Machine Config) defaults to **10 s**. Speed loss is **net**: Σ(CT − ideal), so a 14 s cycle
+  adds 4 s and a 9 s cycle takes 1 s back; it can go negative (shown green).
 - Status word (D100) is mapped through the line's status codes (0 IDLE, 1 RUNNING, 2 BREAKDOWN, …)
   into the shift timeline and loss times. If it is missing, RUNNING/IDLE is derived from the cycles.
   `PLC OFFLINE` is logged while the PLC can't be reached.
 - Shifts and hourly slots come from `data/mgmt/line.json`. Cycles made in a gap after a shift (OT) count
-  for that shift. Plan = working time so far ÷ the machine's ideal CT (Machine Config).
+  for that shift. Plan = working time so far ÷ the machine's ideal CT (Machine Config). Time without PLC
+  data (`PLC OFFLINE`) counts neither for plan nor against availability.
+- CT distribution keeps the line's recorded 30-day histogram (`data/mgmt/ct-histogram.json`).
 - Data registers and digital inputs from "Monitor Config" are read every second and shown in
   **Collector Data** (Machine Config tab ④, and the 📡 COLLECTOR button on MANAGEMENT-2).
+
+**Demo PLC run — `demo_plc.py`** (Collector Data → ▶ Run demo)
+- Deletes all live data (cycles, timeline, clips), then a built-in demo PLC plays N cycles (default 30)
+  over the same SLMP path: CT written to D103, OK pulse on L108. Cycle times are mixed around the ideal
+  (e.g. 9, 10, 14 s for 10 s), so speed loss goes + and −. Takes about N × ideal seconds.
+- The real PLC is not read during the demo; the collector switches back to it afterwards.
+- Video: the real camera if it is streaming, otherwise a generated test picture (needs ffmpeg).
 
 **Camera — `camera.py`** (settings: Camera page)
 - Panasonic RTSP, default `rtsp://admin:<password>@192.168.30.20:554/MediaInput/h264` (stream 1).

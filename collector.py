@@ -122,6 +122,19 @@ class LiveStore:
             self.save_state()
             return self.state["last_seq"]
 
+    def clear(self):
+        """Delete every stored cycle and status entry and restart the cycle numbers at 1."""
+        with self.lock:
+            for d in (self.cdir, self.sdir):
+                for n in os.listdir(d):
+                    try:
+                        os.remove(os.path.join(d, n))
+                    except OSError:
+                        pass
+            self._cache.clear()
+            self.state["last_seq"] = 0
+            self.save_state()
+
     @staticmethod
     def key(record_date, shift):
         return f"{record_date}_{shift}.jsonl"
@@ -173,13 +186,6 @@ class LiveStore:
                 out.append((d, s, os.path.join(self.cdir, name)))
         return out
 
-    def all_cycles(self, since_date=None):
-        rows = []
-        for d, s, path in self.shift_files():
-            if since_date is None or d >= since_date:
-                rows.extend(self._rows(path))
-        return rows
-
 
 # ---------- collector ----------
 def _group(addrs, max_span=64, max_gap=8):
@@ -210,6 +216,7 @@ class Collector:
         self.status_key = None               # (record_date, shift) the status was last logged for
         self.last_cycle_at = None            # datetime of the last OK/NG signal
         self.last_cycle_key = None
+        self.override = None                 # PLC settings used instead of the saved ones (demo PLC)
 
     # ----- public -----
     def start(self):
@@ -219,6 +226,20 @@ class Collector:
 
     def reload(self):
         self.cfg_version += 1
+
+    def set_override(self, cfg):
+        """Read another PLC (e.g. the demo PLC) without touching the saved Machine Config; None = back."""
+        self.override = cfg
+        self.reload()
+
+    def reset_data(self):
+        """Forget every live cycle and status entry (and the in-memory cycle/status state)."""
+        with self.slock:
+            self.store.clear()
+            self.status = self.status_code = self.status_key = None
+            self.last_cycle_at = self.last_cycle_key = None
+        with self.lock:
+            self.info["events"] = 0
 
     def snapshot(self):
         with self.lock:
@@ -276,7 +297,7 @@ class Collector:
     def _run(self):
         backoff = 1.0
         while True:
-            cfg = self.get_machine_cfg()
+            cfg = {**self.get_machine_cfg(), **(self.override or {})}
             version = self.cfg_version
             ip = str(cfg.get("plc_ip") or "").strip()
             proto = str(cfg.get("protocol") or "")
@@ -346,7 +367,7 @@ class Collector:
                 rising = prev is not None and ((cur[0] and not prev[0]) or (cur[1] and not prev[1]))
                 if rising and time.monotonic() - last_event >= min_gap:
                     last_event = time.monotonic()
-                    self._cycle(cfg, is_ng=bool(cur[1] and not prev[1]))
+                    self._cycle(cfg, is_ng=bool(cur[1] and not prev[1]), client=client)
                 prev = cur
             else:
                 vals = self._read_words(client, [ok_reg, ng_reg])
@@ -356,7 +377,7 @@ class Collector:
                         d = cur[i] - prev[i]
                         if 0 < d <= 5:   # bigger jumps = counter preset / resync, not cycles
                             for _ in range(d):
-                                self._cycle(cfg, is_ng=is_ng)
+                                self._cycle(cfg, is_ng=is_ng, client=client)
                 prev = cur
             polls += 1
             self._set(last_poll=_now().isoformat(timespec="milliseconds"),
@@ -431,21 +452,41 @@ class Collector:
                 errs.append(f"{format_address(dev, n)}..{format_address(dev, n + cnt - 1)}: {e}")
         return out, errs
 
-    def _cycle(self, cfg, is_ng):
+    @staticmethod
+    def _plc_ct(client, cfg):
+        """The cycle time the PLC itself measured (Machine Config "cycle time register", e.g.
+        D103 in 0.1 s), read right after the OK/NG signal. None when unset, unreadable or 0."""
+        reg = str(cfg.get("ct_register") or "").strip()
+        if not reg or client is None:
+            return None
+        try:
+            dev, n = parse_address(reg)
+            raw = client.read_words(dev, n, 1)[0]
+            ct = raw * float(cfg.get("ct_register_scale") or 0.1)
+        except (ValueError, SlmpError):
+            return None
+        return round(ct, 2) if ct > 0 else None
+
+    def _cycle(self, cfg, is_ng, client=None):
         now = _now()
         rd, sh, _ = self.clock.at(now)
         max_ct = float(cfg.get("max_allowed_cycle") or 40.0)
         gap = None
         if self.last_cycle_at is not None and self.last_cycle_key == (rd, sh):
             gap = (now - self.last_cycle_at).total_seconds()
-        # First cycle of a shift, or after a stop: the real cycle time is unknown —
-        # count it at the max allowed cycle time instead of the whole stop.
-        ct = round(gap, 2) if gap is not None and gap <= max_ct else max_ct
+        plc_ct = self._plc_ct(client, cfg)
+        if plc_ct is not None:
+            ct, capped, source = min(plc_ct, max_ct), plc_ct > max_ct, "plc"
+        else:
+            # Time since the previous signal.  First cycle of a shift, or after a stop: the real
+            # cycle time is unknown — count it at the max allowed cycle time, not the whole stop.
+            capped = gap is None or gap > max_ct
+            ct, source = (max_ct if capped else round(gap, 2)), "measured"
         self.last_cycle_at, self.last_cycle_key = now, (rd, sh)
         seq = self.store.next_seq()
         row = {"cycle_seq": seq, "ts": now.isoformat(timespec="microseconds"), "ct": ct, "is_ng": is_ng,
                "part_code": f"{now:%Y%m%d}-{seq:06d}", "gap": None if gap is None else round(gap, 2),
-               "capped": gap is None or gap > max_ct}
+               "capped": capped, "ct_source": source}
         self.store.add_cycle(rd, sh, row)
         with self.lock:
             self.info["events"] = self.info.get("events", 0) + 1

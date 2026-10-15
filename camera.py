@@ -77,6 +77,7 @@ class Camera:
         self.clips = queue.Queue()
         self.seg_seen = {}                   # segment file -> wall time it appeared (its first frame's arrival)
         self.launches = []                   # wall times the recording ffmpeg was (re)started
+        self.demo = None                     # None | "camera" (record the real camera) | "synthetic" (test pattern)
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
                      "last_clip_error": None, "source": None}
@@ -110,6 +111,33 @@ class Camera:
     def reload(self):
         self.cfg_version += 1
 
+    def set_demo(self, mode):
+        """Demo run: always record; mode "synthetic" records a generated test picture instead of the
+        camera (used when the real camera is not streaming). None = back to the saved settings."""
+        self.demo = mode
+        self.reload()
+
+    def reset_clips(self):
+        """Drop queued clips and delete every live cycle clip (cycle numbers restart)."""
+        while True:
+            try:
+                self.clips.get_nowait()
+            except queue.Empty:
+                break
+        for root in {self.clips_root(), self.default_clips_dir}:
+            d = os.path.join(root, "live")
+            try:
+                names = os.listdir(d)
+            except OSError:
+                continue
+            for n in names:
+                if n.endswith(".mp4"):
+                    try:
+                        os.remove(os.path.join(d, n))
+                    except OSError:
+                        pass
+        self._set(clips_cut=0, clips_failed=0, last_clip=None, last_clip_error=None)
+
     def stop(self):
         self._kill()
 
@@ -118,7 +146,8 @@ class Camera:
             out = dict(self.info)
         out["viewers"] = self.viewers
         out["last_frame_age_s"] = round(time.time() - self.frame_at, 1) if self.frame_at else None
-        out["rtsp_url"] = rtsp_url(self.get_cfg(), hide_password=True)
+        out["rtsp_url"] = "demo test picture" if self.demo == "synthetic" else rtsp_url(self.get_cfg(), hide_password=True)
+        out["demo"] = self.demo
         return out
 
     def add_viewer(self):
@@ -186,8 +215,8 @@ class Camera:
         version, backoff = None, 1.0
         while True:
             cfg = self.get_cfg()
-            ip = str(cfg.get("ip") or "").strip()
-            record = bool(cfg.get("recording_enabled")) and bool(ip) and bool(self.ffmpeg)
+            ip = "demo" if self.demo == "synthetic" else str(cfg.get("ip") or "").strip()
+            record = (bool(cfg.get("recording_enabled")) or bool(self.demo)) and bool(ip) and bool(self.ffmpeg)
             want = "record" if record else ("preview" if ip and self.ffmpeg and self._want_preview() else None)
             running = self.proc is not None and self.proc.poll() is None
 
@@ -219,16 +248,22 @@ class Camera:
             time.sleep(0.5)
 
     def _launch(self, cfg, kind):
-        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
-               "-rtsp_transport", "tcp", "-timeout", "10000000", "-i", rtsp_url(cfg)]
+        synthetic = self.demo == "synthetic"
+        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
+        if synthetic:     # generated 1280x720 test picture with a running clock, encoded like a camera
+            cmd += ["-re", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25"]
+            vcodec = ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-g", "25", "-pix_fmt", "yuv420p"]
+        else:
+            cmd += ["-rtsp_transport", "tcp", "-timeout", "10000000", "-i", rtsp_url(cfg)]
+            vcodec = ["-c:v", "copy"]
         if kind == "record":
             os.makedirs(self.seg_dir(), exist_ok=True)
-            cmd += ["-map", "0:v:0", "-c:v", "copy", "-an", "-f", "segment", "-segment_time", str(SEGMENT_S),
+            cmd += ["-map", "0:v:0", *vcodec, "-an", "-f", "segment", "-segment_time", str(SEGMENT_S),
                     "-segment_format", "mpegts", "-strftime", "1",
                     os.path.join(self.seg_dir(), "%Y%m%d_%H%M%S.ts")]
         cmd += ["-map", "0:v:0", "-an", "-vf", "fps=5,scale=960:-2", "-c:v", "mjpeg", "-q:v", "7",
                 "-f", "image2pipe", "pipe:1"]
-        self._set(state="connecting", source="rtsp", recording=False)
+        self._set(state="connecting", source="demo" if synthetic else "rtsp", recording=False)
         self._started = time.time()
         if kind == "record":
             self.launches = self.launches[-50:] + [self._started]

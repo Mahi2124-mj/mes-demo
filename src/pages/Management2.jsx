@@ -79,7 +79,10 @@ function useChartJS(cb, deps = []) {
 function fmtSec(s) {
   if (!s) return "00:00:00";
   s = parseInt(s);
-  return [Math.floor(s/3600), Math.floor((s%3600)/60), s%60]
+  // Live demo: net speed loss can be negative (cycles faster than ideal) -> "-00:00:12".
+  const sign = s < 0 ? "-" : "";
+  s = Math.abs(s);
+  return sign + [Math.floor(s/3600), Math.floor((s%3600)/60), s%60]
     .map(v => String(v).padStart(2,"0")).join(":");
 }
 
@@ -4932,15 +4935,17 @@ export default function Management2() {
               </div>
               <div style={{flex:1,overflowY:"auto",padding:"4px 0"}}>
                 {lossData.map(r => {
-                  const pct = totalLoss > 0 ? (r.sec/totalLoss*100) : 0;
+                  const pct = totalLoss > 0 && r.sec > 0 ? Math.min(100, r.sec/totalLoss*100) : 0;
+                  // negative = time gained (net speed loss below zero): shown green
+                  const valClr = r.sec > 0 ? r.color : r.sec < 0 ? STATUS_CLR["RUNNING"] : textMut;
                   return (
                     <div key={r.key} style={{padding:"3px 12px"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           <div style={{width:6,height:6,borderRadius:2,background:r.color,flexShrink:0}}/>
-                          <span style={{fontSize:11,color:r.sec>0?textSub:textMut,fontWeight:r.sec>0?700:500}}>{r.label}</span>
+                          <span style={{fontSize:11,color:r.sec?textSub:textMut,fontWeight:r.sec?700:500}}>{r.label}</span>
                         </div>
-                        <span style={{fontFamily:"monospace",fontSize:11,fontWeight:800,color:r.sec>0?r.color:textMut}}>{fmtSec(r.sec)}</span>
+                        <span style={{fontFamily:"monospace",fontSize:11,fontWeight:800,color:valClr}}>{fmtSec(r.sec)}</span>
                       </div>
                       <div style={{background:D?"#141e2e":"#e2e8f0",borderRadius:99,height:2,overflow:"hidden"}}>
                         <div style={{width:`${pct}%`,height:"100%",background:r.color,borderRadius:99,transition:"width .6s"}}/>
@@ -6281,19 +6286,19 @@ export default function Management2() {
                                 title={clickable ? "Click to add/edit remark for this loss" : ""}
                                 style={{padding:"8px 10px",textAlign:"right",
                                          fontFamily:"monospace",
-                                         color:sec>0?c.color:textMut,
-                                         fontWeight:sec>0?700:400,
+                                         color:sec>0?c.color:sec<0?STATUS_CLR["RUNNING"]:textMut,
+                                         fontWeight:sec?700:400,
                                          cursor: clickable ? "pointer" : "default",
                                          textDecoration: clickable ? "underline dotted" : "none",
                                          textUnderlineOffset: 2}}>
-                              {sec>0 ? fmtSec(sec) : "—"}
+                              {sec ? fmtSec(sec) : "—"}
                             </td>
                           );
                         })}
                         <td style={{padding:"8px 12px",textAlign:"right",
                                     fontFamily:"monospace",fontWeight:800,
-                                    color:s.total_loss>0?STATUS_CLR["BREAKDOWN"]:textMut}}>
-                          {s.total_loss>0 ? fmtSec(s.total_loss) : "—"}
+                                    color:s.total_loss>0?STATUS_CLR["BREAKDOWN"]:s.total_loss<0?STATUS_CLR["RUNNING"]:textMut}}>
+                          {s.total_loss ? fmtSec(s.total_loss) : "—"}
                         </td>
                       </tr>
                     ))}
@@ -6308,8 +6313,8 @@ export default function Management2() {
                         return (
                           <td key={c.key} style={{padding:"10px 10px",textAlign:"right",
                                                    fontFamily:"monospace",fontWeight:800,
-                                                   color:sec>0?c.color:textMut}}>
-                            {sec>0 ? fmtSec(sec) : "—"}
+                                                   color:sec>0?c.color:sec<0?STATUS_CLR["RUNNING"]:textMut}}>
+                            {sec ? fmtSec(sec) : "—"}
                           </td>
                         );
                       })}

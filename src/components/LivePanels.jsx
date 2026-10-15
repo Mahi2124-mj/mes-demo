@@ -6,6 +6,7 @@
 //                                    this shift's counts, last cycles, camera status
 //   GET /api/demo/camera/live.mjpg   live picture (multipart JPEG, ~5 fps)
 //   GET /api/lines/99/cycle-video    a recorded cycle clip (99 = the live line)
+//   POST /api/demo/run-demo          {cycles} start / {stop:true} stop the demo PLC run
 import { useEffect, useRef, useState } from "react";
 
 const COLLECTOR_URL = "/api/demo/collector";
@@ -106,12 +107,21 @@ export function CameraLive({ dark = false }) {
   const [nonce, setNonce] = useState(() => Date.now());
   const [loaded, setLoaded] = useState(false);
   const imgRef = useRef(null);
+  // Start the never-ending MJPEG request only after the page has loaded, so it doesn't keep
+  // the browser's page load (tab spinner) pending while the camera is down.
+  const [pageReady, setPageReady] = useState(() => document.readyState === "complete");
+  useEffect(() => {
+    if (pageReady) return undefined;
+    const on = () => setPageReady(true);
+    window.addEventListener("load", on);
+    return () => window.removeEventListener("load", on);
+  }, [pageReady]);
 
   // Drop the stream when the preview closes so the browser frees the connection.
   useEffect(() => {
     const img = imgRef.current;
     return () => { if (img) img.src = ""; };
-  }, [nonce]);
+  }, [nonce, pageReady]);
 
   const st = CAM_STATE[cam?.state] || { label: cam?.state || "…", color: "#94a3b8" };
   const stale = cam && (cam.last_frame_age_s == null || cam.last_frame_age_s > 5);
@@ -120,10 +130,12 @@ export function CameraLive({ dark = false }) {
   return (
     <div>
       <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#0f172a", borderRadius: 10, overflow: "hidden", border: `1px solid ${c.border}` }}>
-        <img ref={imgRef} key={nonce} src={`${LIVE_URL}?t=${nonce}`} alt="Live camera"
-          onLoad={() => setLoaded(true)} onError={() => setLoaded(false)}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", display: "block",
-                   opacity: showPicture ? 1 : 0.25 }} />
+        {pageReady && (
+          <img ref={imgRef} key={nonce} src={`${LIVE_URL}?t=${nonce}`} alt="Live camera"
+            onLoad={() => setLoaded(true)} onError={() => setLoaded(false)}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", display: "block",
+                     opacity: showPicture ? 1 : 0.25 }} />
+        )}
         {showPicture ? (
           <span style={{ position: "absolute", top: 10, left: 10, padding: "3px 9px", borderRadius: 6, background: "rgba(220,38,38,.9)",
                          color: "#fff", fontSize: 11, fontWeight: 800, letterSpacing: ".08em" }}>● LIVE</span>
@@ -171,6 +183,8 @@ export function CollectorLive({ dark = false }) {
   const c = palette(dark);
   const { data, error } = useCollector(1000);
   const [playSeq, setPlaySeq] = useState(null);
+  const [demoN, setDemoN] = useState(30);
+  const [demoMsg, setDemoMsg] = useState(null);
 
   const card = { background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: 16, minWidth: 0 };
   const head = { fontSize: 11, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: c.sub, margin: "0 0 10px" };
@@ -183,6 +197,21 @@ export function CollectorLive({ dark = false }) {
   }
   const plc = data.plc || {};
   const v = plc.values || {};
+  const demo = data.demo || {};
+  const demoBusy = ["starting", "running", "finishing"].includes(demo.state);
+  const ideal = plc.ideal_cycle_time;
+  const runDemo = async (stop) => {
+    if (!stop && !window.confirm(`Delete ALL live data (cycles, timeline, clips) and run ${demoN} demo cycles?\n`
+        + `The real PLC is not read while the demo runs (about ${Math.round(demoN * (ideal || 10) / 60 + 1)} min).`)) return;
+    setDemoMsg(null);
+    try {
+      const r = await fetch("/api/demo/run-demo", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify(stop ? { stop: true } : { cycles: demoN }) });
+      if (!r.ok) setDemoMsg((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+    } catch { setDemoMsg("Demo server not reachable"); }
+  };
+  const DEMO_LABEL = { starting: "Starting…", running: "Running", finishing: "Finishing (last clip)…",
+                       done: "Finished", stopped: "Stopped", error: "Error" };
   const st = PLC_STATE[plc.state] || { label: plc.state, color: "#94a3b8" };
   const statusName = plc.status || "—";
   const sh = data.shift || {};
@@ -212,11 +241,63 @@ export function CollectorLive({ dark = false }) {
 
   return (
     <div style={{ display: "grid", gap: 14, fontFamily: "'Barlow','Segoe UI',sans-serif" }}>
+      {/* Demo run */}
+      <div style={{ ...card, borderColor: demoBusy ? "#7c3aed" : c.border }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: c.text }}>Demo PLC run</span>
+          {demo.state && demo.state !== "idle" && (
+            <Chip label={DEMO_LABEL[demo.state] || demo.state}
+                  color={demo.state === "error" ? "#dc2626" : demoBusy ? "#7c3aed" : demo.state === "done" ? "#16a34a" : "#94a3b8"} />
+          )}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {!demoBusy && (
+              <label style={{ fontSize: 11, color: c.sub, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                Cycles
+                <input type="number" min={1} max={200} value={demoN}
+                  onChange={e => setDemoN(Math.max(1, Math.min(200, parseInt(e.target.value, 10) || 1)))}
+                  style={{ width: 60, padding: "4px 6px", borderRadius: 6, border: `1px solid ${c.border}`, background: c.deep, color: c.text, fontSize: 12 }} />
+              </label>
+            )}
+            {demoBusy ? (
+              <button type="button" onClick={() => runDemo(true)}
+                style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid rgba(220,38,38,.4)", background: c.ngBg, color: "#dc2626", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>
+                ■ Stop demo
+              </button>
+            ) : (
+              <button type="button" onClick={() => runDemo(false)}
+                style={{ padding: "6px 14px", borderRadius: 7, border: "none", background: "linear-gradient(135deg,#6d28d9,#7c3aed)", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>
+                ▶ Run demo
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: c.sub, marginTop: 6, lineHeight: 1.6 }}>
+          Deletes the live data first, then a demo PLC plays the cycles through the same SLMP path as the real
+          FX5U — ideal CT <b style={{ color: c.text }}>{ideal ?? "—"} s</b>, cycle times mixed around it
+          (e.g. {ideal ? `${(ideal * 0.9).toFixed(0)}, ${ideal.toFixed(0)}, ${(ideal * 1.4).toFixed(0)}` : "9, 10, 14"} s), so speed loss goes + and −.
+          The CT distribution chart keeps the line's 30-day history.
+        </div>
+        {(demoBusy || demo.state === "done" || demo.state === "stopped") && demo.total > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ height: 6, borderRadius: 99, background: c.deep, border: `1px solid ${c.border}`, overflow: "hidden" }}>
+              <div style={{ width: `${(100 * (demo.done || 0)) / demo.total}%`, height: "100%", background: "#7c3aed", transition: "width .4s" }} />
+            </div>
+            <div style={{ fontSize: 11, color: c.sub, marginTop: 4 }}>
+              Cycle <b style={{ color: c.text }}>{demo.done || 0} / {demo.total}</b>
+              {demo.last_ct != null && <> · last CT <b style={{ color: c.text }}>{demo.last_ct} s</b></>}
+              {demo.camera && <> · video: {demo.camera === "synthetic" ? "demo test picture (camera not streaming)" : demo.camera === "camera" ? "real camera" : demo.camera}</>}
+            </div>
+          </div>
+        )}
+        {(demo.error || demoMsg) && <div style={{ marginTop: 8, fontSize: 12, color: "#dc2626" }}>{demo.error || demoMsg}</div>}
+      </div>
+
       {/* Connection */}
       <div style={card}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 800, color: c.text }}>{plc.machine_name || "Machine"}</span>
           <Chip label={st.label} color={st.color} />
+          {plc.demo_plc && <Chip label="Demo PLC" color="#7c3aed" />}
           <span style={{ fontSize: 12, color: c.sub, fontFamily: "monospace" }}>{plc.plc_ip || "—"}:{plc.plc_port}</span>
           <span style={{ fontSize: 11, color: c.sub }}>{plc.protocol} · count mode: {plc.count_mode}</span>
           <span style={{ marginLeft: "auto", fontSize: 11, color: c.sub }}>
@@ -317,7 +398,8 @@ export function CollectorLive({ dark = false }) {
                 <tr key={r.cycle_seq} style={{ background: i % 2 ? c.rowAlt : "transparent" }}>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.cycle_seq}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{fmtTime(r.ts)}</td>
-                  <td style={{ ...td, fontFamily: "monospace" }} title={r.capped ? "First cycle after a stop: counted at the max allowed cycle time" : undefined}>
+                  <td style={{ ...td, fontFamily: "monospace" }}
+                      title={r.capped ? "Counted at the max allowed cycle time" : r.ct_source === "plc" ? "Cycle time from the PLC register" : "Time since the previous OK/NG signal"}>
                     {r.ct?.toFixed?.(2) ?? r.ct}{r.capped ? " *" : ""}
                   </td>
                   <td style={td}>
@@ -341,7 +423,10 @@ export function CollectorLive({ dark = false }) {
             </tbody>
           </table>
         </div>
-        <div style={{ marginTop: 8, fontSize: 10, color: c.mut }}>* first cycle after a stop: its real cycle time is unknown, so it is counted at the max allowed cycle time.</div>
+        <div style={{ marginTop: 8, fontSize: 10, color: c.mut }}>
+          CT comes from the PLC's cycle time register ({plc.ct_register || "not set"}) when it has a value, else the time since the previous signal.
+          * longer than the max allowed cycle time (a stop): counted at the max.
+        </div>
       </div>
     </div>
   );
