@@ -42,14 +42,14 @@ BY_SUB = {m["sub_id"]: m for m in CYCLES["machines"]}       # 0 = main (Final In
 
 MACHINE_DEFAULTS = {
     "machine_name": "Nut-Runner Demo Station", "plc_model": "Mitsubishi FX5U-32MT/ESS",
-    "plc_ip": "", "plc_port": 5000, "protocol": "SLMP 3E (binary)", "count_mode": "bit",
+    "plc_ip": "192.168.30.10", "plc_port": 5000, "protocol": "SLMP 3E (binary)", "count_mode": "bit",
     "ok_bit_address": "L108", "ng_bit_address": "L109", "ok_data_register": "D101",
     "ng_data_register": "D102", "shift_reset_bit": "L110", "status_address": "D100",
     "ideal_cycle_time": 20.0, "max_allowed_cycle": 40.0, "ok_ng_pulse_min_gap": 0.5,
     "nf2_camera_id": "CAM-01", "machine_seq": 0,
 }
 CAMERA_DEFAULTS = {
-    "camera_id": "CAM-01", "name": "Station camera", "ip": "", "port": 554,
+    "camera_id": "CAM-01", "name": "Station camera", "ip": "192.168.30.20", "port": 554,
     "rtsp_path": "/Streaming/Channels/101", "username": "admin", "password": "",
     "assigned_machine": "Nut-Runner Demo Station", "recording_enabled": True,
     "codec": "H.264 Main", "resolution": "1920 × 1080", "fps": 25, "bitrate_kbps": 2000,
