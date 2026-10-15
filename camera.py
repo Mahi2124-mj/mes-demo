@@ -1,7 +1,7 @@
 """Camera side of the live demo: recording, per-cycle clips and live preview.
 
-One ffmpeg process reads the camera's RTSP stream (Panasonic default path
-/MediaInput/h264) and writes two things at once:
+One ffmpeg process reads the camera's RTSP stream (default path
+/h264/ch1/main/av_stream, set on the Camera page) and writes two things at once:
   * 4-second MPEG-TS segments (stream copy, no re-encode) into <clips>/live/seg/
   * a 5 fps, 960 px wide JPEG stream on stdout for the live preview
 For every cycle the collector reports, the matching seconds are cut out of the
@@ -9,7 +9,7 @@ segments (stream copy again) into <clips>/live/cycle_<seq>.mp4.
 
 When recording is OFF, the preview still works: ffmpeg is started only while
 someone is watching.  Without ffmpeg installed, the preview falls back to the
-camera's HTTP snapshot (Panasonic /cgi-bin/camera) and no clips are recorded.
+camera's HTTP snapshot (SNAPSHOT_PATHS) and no clips are recorded.
 """
 import bisect
 import datetime as dt
@@ -28,7 +28,8 @@ PREVIEW_IDLE_S = 20         # stop a preview-only ffmpeg this long after the las
 STALL_S = 15                # no frame for this long -> restart ffmpeg
 SEEK_MARGIN_S = 1.5         # stream-copy cuts begin on a keyframe; seek earlier so a clip never starts late
 LATENCY_S = 0.5             # an IP camera's picture reaches us about this long after the moment it shows
-SNAPSHOT_PATHS = ("/cgi-bin/camera?resolution=640", "/SnapshotJPEG?Resolution=640x480")
+SNAPSHOT_PATHS = ("/ISAPI/Streaming/channels/101/picture", "/cgi-bin/camera?resolution=640",
+                  "/SnapshotJPEG?Resolution=640x480")
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0       # CREATE_NO_WINDOW
 
 

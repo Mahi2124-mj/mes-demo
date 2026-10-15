@@ -23,7 +23,7 @@ export const DEFAULTS = {
   name: "Station camera",
   ip: "192.168.30.20",
   port: 554,
-  rtsp_path: "/MediaInput/h264",            // Panasonic, stream 1
+  rtsp_path: "/h264/ch1/main/av_stream",    // the station camera's main stream
   username: "admin",
   password: "",
   assigned_machine: "Nut-Runner Demo Station",
@@ -596,9 +596,9 @@ export default function CameraConfig() {
                 <Input id="cc-port" type="number" min={1} max={65535} step={1} value={form.port}
                        onChange={e => set("port", e.target.value)} onBlur={touch("port")} invalid={!!errOf("port")} style={monoInput} />
               </FF>
-              <FF label="RTSP Path" error={errOf("rtsp_path")} hint="Panasonic: /MediaInput/h264 (stream 1)" htmlFor="cc-path">
+              <FF label="RTSP Path" error={errOf("rtsp_path")} hint="Main stream, e.g. /h264/ch1/main/av_stream" htmlFor="cc-path">
                 <Input id="cc-path" value={form.rtsp_path} onChange={e => set("rtsp_path", e.target.value)} onBlur={touch("rtsp_path")}
-                       placeholder="/MediaInput/h264" invalid={!!errOf("rtsp_path")} spellCheck={false} style={monoInput} />
+                       placeholder="/h264/ch1/main/av_stream" invalid={!!errOf("rtsp_path")} spellCheck={false} style={monoInput} />
               </FF>
               <FF label="Assigned Machine *" error={errOf("assigned_machine")} htmlFor="cc-mach">
                 <Select id="cc-mach" value={form.assigned_machine} onChange={e => set("assigned_machine", e.target.value)} invalid={!!errOf("assigned_machine")}>

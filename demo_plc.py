@@ -1,10 +1,11 @@
 """Demo PLC: a small stand-in for the FX5U for demos without the machine.
 
 It answers the same SLMP requests as the real PLC (binary 3E/4E, batch read of
-words and bits) on 127.0.0.1 and plays a list of cycle times: for each cycle it
-writes the cycle time to D103 (0.1 s), counts D101 and pulses the OK bit L108,
-like the machine program does.  The collector reads it exactly like the real
-PLC, so demo cycles take the normal path (signals -> cycles -> clips -> dashboard).
+words and bits) on 127.0.0.1 and plays a list of cycle times on the addresses
+saved on Machine Config (PLC Config): for each cycle it writes the cycle time
+register, counts the OK or NG counter and pulses the OK or NG bit, like the
+machine program does.  The collector reads it exactly like the real PLC, so demo
+cycles take the normal path (signals -> cycles -> clips -> dashboard).
 Nothing here talks to the real PLC.
 """
 import random
@@ -13,18 +14,34 @@ import struct
 import threading
 import time
 
+from slmp import parse_address
+
 CODES = {0x9C: "X", 0x9D: "Y", 0x90: "M", 0x92: "L", 0x93: "F", 0xA0: "B", 0x91: "SM",
          0xA8: "D", 0xB4: "W", 0xAF: "R", 0xA9: "SD", 0xB0: "ZR"}
 BIT_DEVS = {"X", "Y", "M", "L", "F", "B", "SM"}
 PULSE_S = 0.6            # how long the OK bit stays ON (the collector ignores edges < 0.5 s apart)
 
-# Settings the collector uses while the demo runs (same addresses as the Machine Config defaults).
-COLLECTOR_SETTINGS = {
-    "plc_ip": "127.0.0.1", "protocol": "SLMP 3E (binary)", "count_mode": "bit",
-    "ok_bit_address": "L108", "ng_bit_address": "L109", "ok_data_register": "D101",
-    "ng_data_register": "D102", "status_address": "D100", "ct_register": "D103",
-    "ct_register_scale": 0.1, "ok_ng_pulse_min_gap": 0.5,
-}
+
+def collector_settings(saved, port):
+    """What the collector uses during the demo: only the connection changes; every signal
+    address (OK/NG bits, counters, status, cycle time register) stays as saved."""
+    proto = str(saved.get("protocol") or "")
+    return {"plc_ip": "127.0.0.1", "plc_port": port,
+            "protocol": proto if "BINARY" in proto.upper() else "SLMP 3E (binary)"}
+
+
+def signal_map(saved):
+    """Saved Machine Config addresses -> (device, number); None when blank or invalid."""
+    def addr(key, default=None):
+        v = str(saved.get(key) or default or "").strip()
+        try:
+            return parse_address(v) if v else None
+        except ValueError:
+            return None
+    return {"ok_bit": addr("ok_bit_address", "L108"), "ng_bit": addr("ng_bit_address", "L109"),
+            "ok_count": addr("ok_data_register"), "ng_count": addr("ng_data_register"),
+            "status": addr("status_address"), "ct": addr("ct_register"),
+            "ct_scale": float(saved.get("ct_register_scale") or 0.1)}
 
 
 def demo_cycle_times(n, ideal):
@@ -130,39 +147,58 @@ class DemoPlc:
             conn.close()
 
     # ----- machine -----
-    def play(self, cycle_times, ideal, on_cycle=None):
-        """Run the cycles in real time. Returns False if stopped early."""
-        self.put("D", 107, int(round(ideal * 10)))
-        self.put("D", 111, 1200)
-        self.put("D", 112, 1500)
-        self.put("X", 7, 1)                                  # E-stop healthy
-        self.put("X", 0, 1)                                  # gun in stand
-        self.put("D", 100, 1)                                # RUNNING
+    def play(self, cycle_times, ideal, sig, ng_cycles=(), on_cycle=None):
+        """Run the cycles in real time on the addresses in `sig` (see signal_map); cycles whose
+        number is in `ng_cycles` end with the NG signal. Returns False if stopped early."""
+        signals = {a for a in (sig["ok_bit"], sig["ng_bit"], sig["ok_count"], sig["ng_count"],
+                               sig["status"], sig["ct"]) if a}
+
+        def extra(dev, n, v):                 # monitor registers / inputs: never over a saved signal
+            if (dev, n) not in signals:
+                self.put(dev, n, v)
+
+        extra("D", 107, int(round(ideal * 10)))
+        extra("D", 111, 1200)
+        extra("D", 112, 1500)
+        extra("X", 7, 1)                                     # E-stop healthy
+        extra("X", 0, 1)                                     # gun in stand
+        if sig["status"]:
+            self.put(*sig["status"], 1)                      # RUNNING
         t_next = time.monotonic()
         for i, ct in enumerate(cycle_times, 1):
+            is_ng = i in ng_cycles
             t_start, t_next = t_next, t_next + ct
-            self.put("X", 0, 0)
-            self.put("X", 5, 1)                              # gun running for most of the cycle
+            extra("X", 0, 0)
+            extra("X", 5, 1)                                 # gun running for most of the cycle
             if self.stopped.wait(max(0.0, t_start + ct * 0.7 - time.monotonic())):
                 return False
-            self.put("X", 5, 0)
-            self.put("X", 0, 1)
+            extra("X", 5, 0)
+            extra("X", 0, 1)
             if self.stopped.wait(max(0.0, t_next - time.monotonic())):
                 return False
-            self.put("D", 103, int(round(ct * 10)))         # last cycle time, 0.1 s
-            self.put("D", 106, i)
-            self.put("D", 104, 1 if i % 2 else 2)
-            self.put("D", 109, random.randint(1300, 1450))  # final torque, 0.01 Nm
-            self.put("D", 110, random.randint(1380, 1480))
-            self.put("D", 118, (self.get("D", 118) + 1) & 0xFFFF)
-            self.put("X", 3, 1)                              # torque OK
-            self.put("D", 101, self.get("D", 101) + 1)
-            self.put("L", 108, 1)
+            extra("D", 106, i)
+            extra("D", 104, 1 if i % 2 else 2)
+            extra("D", 105, 3 if is_ng else 0)               # NG reason code
+            extra("D", 109, random.randint(1150, 1190) if is_ng else random.randint(1300, 1450))
+            extra("D", 110, random.randint(1380, 1480))
+            extra("D", 118, (self.get("D", 118) + 1) & 0xFFFF)
+            extra("X", 4 if is_ng else 3, 1)                 # torque NG / OK
+            if sig["ct"]:
+                self.put(*sig["ct"], int(round(ct / sig["ct_scale"])) & 0xFFFF)
+            counter = sig["ng_count"] if is_ng else sig["ok_count"]
+            if counter:
+                self.put(*counter, (self.get(*counter) + 1) & 0xFFFF)
+            bit = sig["ng_bit"] if is_ng else sig["ok_bit"]
+            if bit:
+                self.put(*bit, 1)
             if on_cycle:
-                on_cycle(i, ct)
+                on_cycle(i, ct, is_ng)
             if self.stopped.wait(PULSE_S):
                 return False
-            self.put("L", 108, 0)
-            self.put("X", 3, 0)
-        self.put("D", 100, 0)                                # IDLE
+            if bit:
+                self.put(*bit, 0)
+            extra("X", 3, 0)
+            extra("X", 4, 0)
+        if sig["status"]:
+            self.put(*sig["status"], 0)                      # IDLE
         return True

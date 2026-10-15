@@ -273,9 +273,10 @@ export function CollectorLive({ dark = false }) {
         </div>
         <div style={{ fontSize: 11, color: c.sub, marginTop: 6, lineHeight: 1.6 }}>
           Deletes the live data first, then a demo PLC plays the cycles through the same SLMP path as the real
-          FX5U — ideal CT <b style={{ color: c.text }}>{ideal ?? "—"} s</b>, cycle times mixed around it
-          (e.g. {ideal ? `${(ideal * 0.9).toFixed(0)}, ${ideal.toFixed(0)}, ${(ideal * 1.4).toFixed(0)}` : "9, 10, 14"} s), so speed loss goes + and −.
-          The CT distribution chart keeps the line's 30-day history.
+          FX5U, on the OK/NG, counter, status and cycle time addresses saved on PLC Config — ideal CT{" "}
+          <b style={{ color: c.text }}>{ideal ?? "—"} s</b>, cycle times mixed around it
+          (e.g. {ideal ? `${(ideal * 0.9).toFixed(0)}, ${ideal.toFixed(0)}, ${(ideal * 1.4).toFixed(0)}` : "9, 10, 14"} s), so speed loss goes + and −;
+          2 cycles end NG. The CT distribution chart keeps the line's 30-day history.
         </div>
         {(demoBusy || demo.state === "done" || demo.state === "stopped") && demo.total > 0 && (
           <div style={{ marginTop: 10 }}>
@@ -285,6 +286,7 @@ export function CollectorLive({ dark = false }) {
             <div style={{ fontSize: 11, color: c.sub, marginTop: 4 }}>
               Cycle <b style={{ color: c.text }}>{demo.done || 0} / {demo.total}</b>
               {demo.last_ct != null && <> · last CT <b style={{ color: c.text }}>{demo.last_ct} s</b></>}
+              {demo.ng > 0 && <> · NG <b style={{ color: "#dc2626" }}>{demo.ng}</b></>}
               {demo.camera && <> · video: {demo.camera === "synthetic" ? "demo test picture (camera not streaming)" : demo.camera === "camera" ? "real camera" : demo.camera}</>}
             </div>
           </div>

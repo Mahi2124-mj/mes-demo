@@ -23,6 +23,7 @@ import atexit
 import datetime as dt
 import json
 import os
+import random
 import signal
 import sys
 import threading
@@ -32,7 +33,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from camera import Camera
 from collector import OFFLINE, Collector, LiveStore, ShiftClock
-from demo_plc import COLLECTOR_SETTINGS as DEMO_PLC_SETTINGS, DemoPlc, demo_cycle_times
+from demo_plc import DemoPlc, collector_settings, demo_cycle_times, signal_map
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -83,7 +84,7 @@ MACHINE_DEFAULTS = {
 }
 CAMERA_DEFAULTS = {
     "camera_id": "CAM-01", "name": "Station camera", "ip": "192.168.30.20", "port": 554,
-    "rtsp_path": "/MediaInput/h264", "username": "admin", "password": "",
+    "rtsp_path": "/h264/ch1/main/av_stream", "username": "admin", "password": "",
     "assigned_machine": "Nut-Runner Demo Station", "recording_enabled": True,
     "codec": "H.264 Main", "resolution": "1920 × 1080", "fps": 25, "bitrate_kbps": 2000,
     "iframe_interval": 25, "video_save_path": os.path.join(HERE, "clips"),
@@ -590,7 +591,7 @@ class DemoRun:
     def __init__(self):
         self.lock = threading.Lock()
         self.plc = None
-        self.info = {"state": "idle", "total": 0, "done": 0, "last_ct": None, "camera": None, "error": None}
+        self.info = {"state": "idle", "total": 0, "done": 0, "ng": 0, "last_ct": None, "camera": None, "error": None}
 
     def snapshot(self):
         with self.lock:
@@ -604,7 +605,7 @@ class DemoRun:
         with self.lock:
             if self.info["state"] in ("starting", "running", "finishing"):
                 return False
-            self.info = {"state": "starting", "total": n, "done": 0, "last_ct": None, "camera": None, "error": None}
+            self.info = {"state": "starting", "total": n, "done": 0, "ng": 0, "last_ct": None, "camera": None, "error": None}
         threading.Thread(target=self._run, args=(n,), name="demo-run", daemon=True).start()
         return True
 
@@ -631,7 +632,8 @@ class DemoRun:
             cam_mode = "camera" if CAMERA.snapshot().get("state") == "streaming" else "synthetic"
             if not CAMERA.ffmpeg:
                 cam_mode = None
-            COLLECTOR.set_override({**DEMO_PLC_SETTINGS, "plc_port": port})
+            saved = machine_cfg()                  # the OK/NG/status/CT addresses saved on PLC Config
+            COLLECTOR.set_override(collector_settings(saved, port))
             COLLECTOR.reset_data()
             CAMERA.reset_clips()
             if cam_mode:
@@ -645,7 +647,12 @@ class DemoRun:
                 time.sleep(5)            # recording must cover the first cycle's start and pre-roll
             self._set(state="running")
             cts = demo_cycle_times(n, ideal)
-            finished = self.plc.play(cts, ideal, on_cycle=lambda i, ct: self._set(done=i, last_ct=ct))
+            ng = set(random.sample(range(2, n + 1), 2)) if n >= 5 else set()   # 2 NG to show the NG signal too
+
+            def counted(i, ct, is_ng):
+                with self.lock:
+                    self.info.update(done=i, last_ct=ct, ng=self.info["ng"] + int(is_ng))
+            finished = self.plc.play(cts, ideal, signal_map(saved), ng_cycles=ng, on_cycle=counted)
             self._set(state="finishing")
             if finished:
                 post = float(camera_cfg().get("post_roll_s") or 0)
