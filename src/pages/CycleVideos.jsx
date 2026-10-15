@@ -56,7 +56,22 @@ export default function CycleVideos() {
   const [sel, setSel] = useState(null);           // selected cycle_seq
   const [pos, setPos] = useState(0);              // playing position (s)
   const [browserDur, setBrowserDur] = useState(null);
+  const [rollMsg, setRollMsg] = useState(null);
   const videoRef = useRef(null);
+
+  // Clip = exactly the cycle: pre-roll and post-roll 0 (only the clip settings change, the stream keeps running).
+  const zeroRolls = async () => {
+    setRollMsg("Saving…");
+    try {
+      const r = await fetch("/api/demo/camera", { method: "PUT", headers: { "Content-Type": "application/json" },
+                                                  body: JSON.stringify({ pre_roll_s: 0, post_roll_s: 0 }) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setRollMsg("Done: new clips = exactly the cycle time.");
+      setData(d => (d ? { ...d, pre_roll_s: 0, post_roll_s: 0 } : d));
+    } catch (e) {
+      setRollMsg(`Could not save: ${e.message}`);
+    }
+  };
 
   useEffect(() => { document.title = "Cycle Videos"; }, []);
 
@@ -132,6 +147,17 @@ export default function CycleVideos() {
                 : <> (pre/post roll 0 s)</>}
               . Match = within ±{TOL_S} s. Click a row to play its clip.
             </div>
+            {data && (data.pre_roll_s > 0 || data.post_roll_s > 0) && (
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <button type="button" onClick={zeroRolls}
+                  style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 800,
+                           color: "#fff", background: "linear-gradient(135deg,#1e40af,#2563eb)" }}>
+                  Make clips = cycle time (pre/post roll → 0 s)
+                </button>
+                <span style={{ fontSize: 11, color: C.sub }}>Only new clips change; clips already saved keep their length.</span>
+              </div>
+            )}
+            {rollMsg && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: rollMsg.startsWith("Could") ? C.ng : C.ok }}>{rollMsg}</div>}
           </div>
           <label style={{ marginLeft: "auto", fontSize: 11, color: C.sub, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
             SHIFT

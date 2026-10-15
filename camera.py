@@ -163,6 +163,7 @@ class Camera:
         self.rtsp_diag = {}                  # cfg_version -> plain-words RTSP answer for ffmpeg's "4XX" errors
         self.run_codec = {}                  # recording run -> video codec the camera sends (h264, hevc, ...)
         self.need_duration = set()           # clips without a cycle_<seq>.json yet
+        self.clip_window = {}                # clip -> its start/end, kept while its length can't be read
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
                      "last_clip_error": None, "source": None, "camera_codec": None}
@@ -192,12 +193,18 @@ class Camera:
         path = self.clip_path(seq)
         if not path:
             return None
+        info = self._read_info(path)
+        if info is None or info.get("duration") is None:
+            self.need_duration.add(path)     # not measured yet (older clip, or the file was busy)
+        return info or {"duration": None}
+
+    @staticmethod
+    def _read_info(path):
         try:
             with open(path[:-4] + ".json", encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, ValueError):
-            self.need_duration.add(path)     # an older clip: measured in the background
-            return {"duration": None}
+            return None
 
     def _duration_of(self, path):
         """Clip length in seconds from ffmpeg's "Duration: 00:00:09.36" line."""
@@ -212,20 +219,32 @@ class Camera:
         return round(int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)), 2) if m else None
 
     def _write_info(self, path, **info):
+        """Store the clip's measured length (plus `info`) in cycle_<seq>.json. If ffmpeg could not read
+        the clip yet (e.g. an antivirus scan holding the new file), nothing is stored and it is retried."""
         info["duration"] = self._duration_of(path)
+        if info["duration"] is None:
+            self.clip_window[path] = {k: v for k, v in info.items() if k != "duration"}
+            self.need_duration.add(path)
+            return
         try:
             with open(path[:-4] + ".json", "w", encoding="utf-8") as f:
                 json.dump(info, f)
         except OSError:
-            pass
+            self.need_duration.add(path)
 
     def _measure_old_clips(self):
+        tried = {}                           # path -> last attempt; retry a failing clip every 10 s
         while True:
             time.sleep(1)
-            while self.need_duration:
-                path = self.need_duration.pop()
-                if os.path.isfile(path) and not os.path.isfile(path[:-4] + ".json"):
-                    self._write_info(path)
+            for path in list(self.need_duration):
+                if time.time() - tried.get(path, 0) < 10:
+                    continue
+                self.need_duration.discard(path)
+                tried[path] = time.time()
+                known = self._read_info(path) or {}
+                if os.path.isfile(path) and known.get("duration") is None:
+                    known.pop("duration", None)
+                    self._write_info(path, **{**known, **self.clip_window.pop(path, {})})
 
     # ----- public -----
     def start(self):
@@ -239,9 +258,19 @@ class Camera:
 
     def set_demo(self, mode):
         """Demo run: always record; mode "synthetic" records a generated test picture instead of the
-        camera (used when the real camera is not streaming). None = back to the saved settings."""
+        camera (used when the real camera is not streaming). None = back to the saved settings.
+        Only a switch to/from the test picture restarts ffmpeg; "record" vs "preview" follows by itself."""
+        switch = (self.demo == "synthetic") != (mode == "synthetic")
         self.demo = mode
-        self.reload()
+        if switch:
+            self.reload()
+
+    def recording_since(self):
+        """Wall time the current recording run wrote its first segment, or None (nothing on disk yet)."""
+        if not self.launches or not self.info.get("recording"):
+            return None
+        mine = [t for t in self.seg_seen.values() if t >= self.launches[-1]]
+        return min(mine) if mine else None
 
     def reset_clips(self):
         """Drop queued clips and delete every live cycle clip (cycle numbers restart)."""
@@ -547,9 +576,7 @@ class Camera:
         for i, (t0, name) in enumerate(segs):
             t1 = segs[i + 1][0] if i + 1 < len(segs) else dt.datetime.now()
             if t0 <= end and t1 >= seek:
-                if use and (t0 - use[-1][0]).total_seconds() > 2.5 * SEGMENT_S:
-                    use = []                 # ffmpeg restarted in between: timestamps restart, keep the later run
-                use.append((t0, name))
+                use.append((t0, name))       # (a segment can be much longer than SEGMENT_S: it ends on a keyframe)
         if not use:
             raise RuntimeError("no recorded video for this time")
         # Each ffmpeg run restarts its timestamps: only join segments of the run that holds the end.

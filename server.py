@@ -642,9 +642,11 @@ class DemoRun:
             if not self._wait(lambda: COLLECTOR.snapshot().get("state") == "connected", 15):
                 raise RuntimeError("the collector did not connect to the demo PLC")
             if cam_mode:
-                if not self._wait(lambda: CAMERA.snapshot().get("recording"), 30):
+                # Wait for the first recorded segment (a camera with a long keyframe interval writes it late),
+                # then a little more, so the recording covers the first cycle's start and its pre-roll.
+                if not self._wait(lambda: CAMERA.recording_since() is not None, 45):
                     raise RuntimeError(CAMERA.snapshot().get("last_error") or "the camera recording did not start")
-                time.sleep(5)            # recording must cover the first cycle's start and pre-roll
+                time.sleep(float(camera_cfg().get("pre_roll_s") or 0) + 3)
             self._set(state="running")
             cts = demo_cycle_times(n, ideal)
             ng = set(random.sample(range(2, n + 1), 2)) if n >= 5 else set()   # 2 NG to show the NG signal too
@@ -1118,7 +1120,9 @@ class Handler(BaseHTTPRequestHandler):
                     obj["password"] = stored.get("password", "")   # blank = keep the stored password
                 obj.pop("password_set", None)
                 _save("camera.json", obj)
-            CAMERA.reload()                       # restart the stream with the new camera settings
+            stream_keys = ("ip", "port", "rtsp_path", "username", "password", "recording_enabled", "video_save_path")
+            if any(stored.get(k) != obj.get(k) for k in stream_keys):
+                CAMERA.reload()                   # restart the stream with the new camera settings
             out = {**obj, "password_set": bool(obj.get("password")), "password": ""}
             return self._json(out)
         return self._json({"ok": True})
