@@ -20,6 +20,7 @@ export const NAV_ITEMS = [
       { key: "supervisor",     label: "Supervisor Dashboard", icon: "/dashboard-icon.png", iconImg: true, path: "/YCA-SS/SUPERVISOR" },
       { key: "management",     label: "Management Dashboard", icon: "📊",                                 path: "/YCA-SS/MANAGEMENT" },
       { key: "management-2",   label: "Management Dashboard 2", icon: "📈",                               path: "/YCA-SS/MANAGEMENT-2" },
+      { key: "cycle-videos",   label: "Cycle Videos",         icon: "🎬",                                 path: "/cycle-videos" },
     ],
   },
   {

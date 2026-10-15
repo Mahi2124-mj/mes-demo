@@ -15,6 +15,7 @@ Two kinds of data:
 | Management Dashboard 2 (**live** PLC + camera) | `http://<server>:5000/YCA-SS/MANAGEMENT-2` |
 | Machine Config (one FX5U machine) + ④ Collector Data | `http://<server>:5000/machine-config` |
 | Camera Setting (one camera) + live preview | `http://<server>:5000/camera` |
+| Cycle Videos (cycle time vs clip length, play each clip) | `http://<server>:5000/cycle-videos` |
 
 ## Data
 - `data/cycles.json` — YCA-SS (line 12) Final Inspection, 2026-10-08 shift A, cycles #1600-#1699.

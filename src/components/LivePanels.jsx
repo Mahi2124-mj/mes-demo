@@ -390,7 +390,8 @@ export function CollectorLive({ dark = false }) {
           return (
             <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: c.deep, border: `1px solid ${why ? "rgba(217,119,6,.4)" : c.border}`,
                           fontSize: 11, color: c.sub, lineHeight: 1.7 }}>
-              <div>Clips folder: <b style={{ color: c.text, fontFamily: "monospace", wordBreak: "break-all" }}>{cam.clips_dir}</b> (cycle_&lt;#&gt;.mp4)</div>
+              <div>Clips folder: <b style={{ color: c.text, fontFamily: "monospace", wordBreak: "break-all" }}>{cam.clips_dir}</b> (cycle_&lt;#&gt;.mp4)
+                {" "}· <a href="/cycle-videos" style={{ color: "#2563eb", fontWeight: 700 }}>Cycle Videos page: video length vs cycle time →</a></div>
               <div>
                 Saved <b style={{ color: c.text }}>{cam.clips_cut}</b>
                 {cam.clips_failed > 0 && <> · failed <b style={{ color: "#dc2626" }}>{cam.clips_failed}</b></>}

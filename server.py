@@ -672,6 +672,27 @@ class DemoRun:
 DEMO = DemoRun()
 
 
+def cycle_videos_view(q):
+    """Cycle Videos page: per cycle its cycle time next to the length of its saved clip."""
+    rd, sh = _live_pick(q)
+    cam = camera_cfg()
+    pre, post = float(cam.get("pre_roll_s") or 0), float(cam.get("post_roll_s") or 0)
+    rows = []
+    for c in reversed(STORE.cycles(rd, sh)):
+        info = CAMERA.clip_info(c["cycle_seq"])
+        expected = round(c["ct"] + pre + post, 2)
+        video = info.get("duration") if info else None
+        rows.append({"cycle_seq": c["cycle_seq"], "ts": c["ts"], "ct": c["ct"], "is_ng": c["is_ng"],
+                     "part_code": c.get("part_code"), "capped": c.get("capped"), "clip": info is not None,
+                     "video_s": video, "expected_s": expected,
+                     "diff_s": None if video is None else round(video - expected, 2)})
+    shifts = [{"record_date": d, "shift_name": s_} for d, s_, _ in reversed(STORE.shift_files())]
+    if not any(x["record_date"] == rd and x["shift_name"] == sh for x in shifts):
+        shifts.insert(0, {"record_date": rd, "shift_name": sh})
+    return {"record_date": rd, "shift_name": sh, "ideal_ct": _live_ideal(), "pre_roll_s": pre, "post_roll_s": post,
+            "shifts": shifts, "rows": rows}
+
+
 def collector_view():
     """Everything the 'Collector data' panels show, in one poll."""
     rd, sh, in_gap = CLOCK.at(dt.datetime.now())
@@ -909,6 +930,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(full) if os.path.isfile(full) else self._json({"detail": "No sample clip"}, 404)
         if p == "/api/demo/collector":
             return self._json(collector_view())
+        if p == "/api/demo/cycle-videos":
+            return self._json(cycle_videos_view(q))
         if p == "/api/demo/camera/live.mjpg":
             return self._mjpeg()
         if p == "/api/demo/camera/snapshot.jpg":

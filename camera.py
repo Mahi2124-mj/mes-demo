@@ -16,6 +16,7 @@ import base64
 import bisect
 import datetime as dt
 import hashlib
+import json
 import os
 import queue
 import re
@@ -161,6 +162,7 @@ class Camera:
         self.demo = None                     # None | "camera" (record the real camera) | "synthetic" (test pattern)
         self.rtsp_diag = {}                  # cfg_version -> plain-words RTSP answer for ffmpeg's "4XX" errors
         self.run_codec = {}                  # recording run -> video codec the camera sends (h264, hevc, ...)
+        self.need_duration = set()           # clips without a cycle_<seq>.json yet
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
                      "last_clip_error": None, "source": None, "camera_codec": None}
@@ -184,11 +186,52 @@ class Camera:
                 return p
         return None
 
+    def clip_info(self, seq):
+        """{"duration": seconds or None, "start", "end"} for a saved clip, None if there is no clip.
+        The length is measured once per clip and kept next to it in cycle_<seq>.json."""
+        path = self.clip_path(seq)
+        if not path:
+            return None
+        try:
+            with open(path[:-4] + ".json", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            self.need_duration.add(path)     # an older clip: measured in the background
+            return {"duration": None}
+
+    def _duration_of(self, path):
+        """Clip length in seconds from ffmpeg's "Duration: 00:00:09.36" line."""
+        if not self.ffmpeg:
+            return None
+        try:
+            r = subprocess.run([self.ffmpeg, "-hide_banner", "-nostdin", "-i", path], stdin=subprocess.DEVNULL,
+                               capture_output=True, timeout=20, creationflags=NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        m = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr.decode("utf-8", "replace"))
+        return round(int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)), 2) if m else None
+
+    def _write_info(self, path, **info):
+        info["duration"] = self._duration_of(path)
+        try:
+            with open(path[:-4] + ".json", "w", encoding="utf-8") as f:
+                json.dump(info, f)
+        except OSError:
+            pass
+
+    def _measure_old_clips(self):
+        while True:
+            time.sleep(1)
+            while self.need_duration:
+                path = self.need_duration.pop()
+                if os.path.isfile(path) and not os.path.isfile(path[:-4] + ".json"):
+                    self._write_info(path)
+
     # ----- public -----
     def start(self):
         for target, name in ((self._supervise, "cam-supervisor"), (self._clipper, "cam-clipper"),
                              (self._janitor, "cam-janitor"), (self._snapshots, "cam-snapshot"),
-                             (self._watch_segments, "cam-segments")):
+                             (self._watch_segments, "cam-segments"), (self._measure_old_clips, "cam-durations")):
             threading.Thread(target=target, name=name, daemon=True).start()
 
     def reload(self):
@@ -214,7 +257,7 @@ class Camera:
             except OSError:
                 continue
             for n in names:
-                if n.endswith(".mp4"):
+                if n.endswith(".mp4") or (n.startswith("cycle_") and n.endswith(".json")):
                     try:
                         os.remove(os.path.join(d, n))
                     except OSError:
@@ -538,7 +581,9 @@ class Camera:
             except OSError:
                 pass
             raise RuntimeError((r.stderr.decode("utf-8", "replace").strip().splitlines() or ["ffmpeg failed"])[-1][:200])
-        os.replace(tmp, os.path.join(out_dir, f"cycle_{seq}.mp4"))
+        final = os.path.join(out_dir, f"cycle_{seq}.mp4")
+        os.replace(tmp, final)
+        self._write_info(final, start=start.isoformat(timespec="milliseconds"), end=end.isoformat(timespec="milliseconds"))
 
     def _codec_of(self, seg_name):
         """Video codec in a recorded segment ("h264", "hevc", ...), read from ffmpeg's stream info."""
@@ -571,7 +616,7 @@ class Camera:
         try:
             for n in os.listdir(self.live_dir()):
                 p = os.path.join(self.live_dir(), n)
-                if n.endswith(".mp4") and os.path.getmtime(p) < cutoff:
+                if (n.endswith(".mp4") or (n.startswith("cycle_") and n.endswith(".json"))) and os.path.getmtime(p) < cutoff:
                     os.remove(p)
         except OSError:
             pass
