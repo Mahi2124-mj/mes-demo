@@ -160,9 +160,10 @@ class Camera:
         self.launches = []                   # wall times the recording ffmpeg was (re)started
         self.demo = None                     # None | "camera" (record the real camera) | "synthetic" (test pattern)
         self.rtsp_diag = {}                  # cfg_version -> plain-words RTSP answer for ffmpeg's "4XX" errors
+        self.run_codec = {}                  # recording run -> video codec the camera sends (h264, hevc, ...)
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
-                     "last_clip_error": None, "source": None}
+                     "last_clip_error": None, "source": None, "camera_codec": None}
 
     # ----- paths -----
     def clips_root(self):
@@ -230,6 +231,7 @@ class Camera:
         out["last_frame_age_s"] = round(time.time() - self.frame_at, 1) if self.frame_at else None
         out["rtsp_url"] = "demo test picture" if self.demo == "synthetic" else rtsp_url(self.get_cfg(), hide_password=True)
         out["demo"] = self.demo
+        out["clips_dir"] = self.live_dir()
         return out
 
     def add_viewer(self):
@@ -509,14 +511,23 @@ class Camera:
         use = [u for u in use if bisect.bisect_right(self.launches, u[0].timestamp()) == run]
         offset = max(0.0, (seek - use[0][0]).total_seconds())
         dur = (end - use[0][0]).total_seconds() - offset
+        if run not in self.run_codec:
+            self.run_codec[run] = self._codec_of(use[0][1])
+            self._set(camera_codec=self.run_codec[run])
+        # Browsers play H.264 only: a camera sending H.265 (or anything else) gets its clips re-encoded.
+        if self.run_codec[run] in ("h264", None):
+            vcodec = ["-c", "copy"]
+        else:
+            vcodec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
+                      "-vf", "scale='min(1280,iw)':-2"]
         out_dir = self.live_dir()
         os.makedirs(out_dir, exist_ok=True)
         tmp = os.path.join(out_dir, f".cycle_{seq}.tmp.mp4")
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                "-ss", f"{offset:.2f}", "-i", "concat:" + "|".join(n for _, n in use),
-               "-t", f"{dur:.2f}", "-map", "0:v:0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", tmp]
+               "-t", f"{dur:.2f}", "-map", "0:v:0", "-an", *vcodec, "-movflags", "+faststart", "-f", "mp4", tmp]
         r = subprocess.run(cmd, cwd=self.seg_dir(), stdin=subprocess.DEVNULL, capture_output=True,
-                           timeout=60, creationflags=NO_WINDOW)
+                           timeout=120, creationflags=NO_WINDOW)
         if r.returncode != 0 or not os.path.isfile(tmp) or os.path.getsize(tmp) < 1024:
             try:
                 os.remove(tmp)
@@ -524,6 +535,16 @@ class Camera:
                 pass
             raise RuntimeError((r.stderr.decode("utf-8", "replace").strip().splitlines() or ["ffmpeg failed"])[-1][:200])
         os.replace(tmp, os.path.join(out_dir, f"cycle_{seq}.mp4"))
+
+    def _codec_of(self, seg_name):
+        """Video codec in a recorded segment ("h264", "hevc", ...), read from ffmpeg's stream info."""
+        try:
+            r = subprocess.run([self.ffmpeg, "-hide_banner", "-nostdin", "-i", seg_name], cwd=self.seg_dir(),
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=20, creationflags=NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        m = re.search(r"Video: (\w+)", r.stderr.decode("utf-8", "replace"))
+        return m.group(1) if m else None
 
     def _janitor(self):
         while True:

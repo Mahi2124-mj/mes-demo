@@ -382,6 +382,26 @@ export function CollectorLive({ dark = false }) {
           <h4 style={{ ...head, margin: 0 }}>Last cycles (this shift)</h4>
           <span style={{ fontSize: 11, color: c.sub }}>newest first · ▶ plays the cycle clip</span>
         </div>
+        {data.camera && (() => {
+          const cam = data.camera;
+          const why = !cam.ffmpeg ? "ffmpeg not found on the server PC: no clips are recorded"
+            : !cam.recording ? (cam.recording_enabled ? `camera not recording (${cam.last_error || cam.state})` : "Camera Recording is OFF (Camera page)")
+            : null;
+          return (
+            <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: c.deep, border: `1px solid ${why ? "rgba(217,119,6,.4)" : c.border}`,
+                          fontSize: 11, color: c.sub, lineHeight: 1.7 }}>
+              <div>Clips folder: <b style={{ color: c.text, fontFamily: "monospace", wordBreak: "break-all" }}>{cam.clips_dir}</b> (cycle_&lt;#&gt;.mp4)</div>
+              <div>
+                Saved <b style={{ color: c.text }}>{cam.clips_cut}</b>
+                {cam.clips_failed > 0 && <> · failed <b style={{ color: "#dc2626" }}>{cam.clips_failed}</b></>}
+                {cam.camera_codec && <> · camera sends <b style={{ color: c.text }}>{String(cam.camera_codec).toUpperCase()}</b>
+                  {cam.camera_codec !== "h264" && " (clips re-encoded to H.264 so browsers can play them)"}</>}
+              </div>
+              {why && <div style={{ color: "#d97706", fontWeight: 700 }}>No clips now: {why}</div>}
+              {cam.last_clip_error && <div style={{ color: "#dc2626" }}>Last clip error: {cam.last_clip_error}</div>}
+            </div>
+          );
+        })()}
         {playSeq != null && (
           <div style={{ marginBottom: 12 }}>
             <video key={playSeq} src={clipUrl(playSeq)} controls autoPlay muted playsInline
