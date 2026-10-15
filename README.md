@@ -37,8 +37,7 @@ Linux:
 
 Windows (PowerShell, in the repo folder):
 
-    npm install
-    .\start.bat      # builds the frontend if needed, then runs: python server.py
+    .\start.bat      # first run: npm install + ffmpeg download into .\ffmpeg; then build + python server.py
                       # stop with Ctrl+C
 
 Rebuild after a frontend change: `npx vite build`, then reload the page.
