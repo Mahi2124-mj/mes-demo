@@ -80,8 +80,8 @@ The server PC must be on the machine network (192.168.30.x).
   for that shift. Plan = working time so far ÷ the machine's ideal CT (Machine Config). Time without PLC
   data (`PLC OFFLINE`) counts neither for plan nor against availability.
 - CT distribution keeps the line's recorded 30-day histogram (`data/mgmt/ct-histogram.json`).
-- Data registers and digital inputs from "Monitor Config" are read every second and shown in
-  **Collector Data** (Machine Config tab ④, and the 📡 COLLECTOR button on MANAGEMENT-2).
+- Cycle signals, counters and the digital inputs from "Monitor Config" are read every second and shown
+  in **Collector Data** (Machine Config tab ④, and the 📡 COLLECTOR button on MANAGEMENT-2).
 
 **Demo PLC run — `demo_plc.py`** (Collector Data → ▶ Run demo)
 - Deletes all live data (cycles, timeline, clips), then a built-in demo PLC plays N cycles (default 30)
