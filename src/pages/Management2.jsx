@@ -11,20 +11,6 @@ import SlideNav from "../components/SlideNav";
 import DocSheetsRow, { DocViewer } from "../components/DocSheets";
 import { CameraLive, CollectorLive, LiveModal } from "../components/LivePanels";
 
-// 2026-06-01 — a timeout (server answers /realtime in ~13ms, so this NEVER
-// trips a healthy call) so a request queued behind a stuck socket releases and
-// the 3s poll retries instead of hanging FOREVER.  Without it, one wedged poll
-// pinned the dashboard on "Offline" permanently.
-//
-// 2026-08-20 — 12s -> 5s.  Traced one wall panel (.235) for three minutes: it
-// polls cleanly every 2.9 s except when a response gets stuck behind the NIC
-// dropping its ACKs (ens2f1 RX ring is 200 of a possible 2047 and is losing
-// ~1 packet/s while the box runs at load ~50).  That one wedged request burned
-// the full 12 s, and 12 s + the next tick pushed the gap to 19 s -- past the
-// staleness cut-off, so the panel painted "Offline" for a stall the operator
-// could not see in the data.  At 5 s the same stall costs ~8 s end to end and
-// the badge stays Live.  This is a shock absorber, not the cure: the real fix
-// is raising the NIC ring (needs root) and taking CPU load off the box.
 const api = axios.create({ baseURL: "", timeout: 5000 });
 
 // Live demo: the page runs on the real clock (the MANAGEMENT page keeps the recorded shift's pinned clock).
@@ -34,15 +20,9 @@ api.interceptors.request.use(cfg => {
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
-// 401-handler: any auth-fail response → wipe session + bounce to /login.
-// Stops the 401-flood that used to happen when an expired-tab kept
-// polling realtime endpoints in the background.
 api.interceptors.response.use(
   r => r,
   err => {
-    // Native Android app with a saved session: swallow transient 401s rather
-    // than bouncing the operator to the password screen (the boot /me probe is
-    // the real validity gate). Desktop / TV wallboards: unchanged.
     const appHasSavedSession = (() => {
       try {
         if (!document.documentElement.classList.contains("cap-android")) return false;
@@ -103,14 +83,6 @@ function oeeColor(v) {
   return v >= 85 ? "#22c55e" : v >= 65 ? "#f59e0b" : v > 0 ? "#ef4444" : "#3d4450";
 }
 
-// 2026-06-05 — A single cycle recorded ACROSS a server restart / long stop
-// reads as a 700s+ "cycle" that is NOT a real cycle time, yet it dominates the
-// MAX chip.  Pick the highest REAL cycle for the Max chip: walk the CT-sorted
-// list and skip leading EXTREME outliers (a CT > 3x the next-highest is such an
-// artifact, e.g. the restart gap).  Returns the same cycle shape (ct_value, ts,
-// part_code, cycle_seq) so the chip + click-to-video keep working.  Only
-// overrides the backend max when that max really IS the skipped outlier — a
-// normal slow cycle (within 3x of the next) is left untouched.
 function pickDisplayMax(eMax, cycles) {
   if (!eMax || !Array.isArray(cycles) || cycles.length < 2) return eMax;
   const sorted = cycles.filter(c => c && c.ct_value > 0)
@@ -122,16 +94,6 @@ function pickDisplayMax(eMax, cycles) {
   return eMax;
 }
 
-// 2026-06-10 — Real-cycle MIN / MAX for the inline chips.  The backend
-// /cycle-extremes reads raw ct_log, so its min is a shift-start scan-fail
-// PHANTOM (0.38s) and its max is a server-restart / long-stop GAP recorded as
-// one giant "cycle" (115-700s) — neither is a real cycle time, and neither has
-// a playable clip.  pickDisplayMax's "3x the next" rule misses GAPS that
-// CLUSTER (192s next to 115s look like a normal step).  So compute both chips
-// from the plausible band [ideal*0.5 , ideal*6]: phantoms (too fast) and gaps
-// (too slow, clustered or not) drop out, leaving genuine cycles whose
-// click-to-play video actually exists.  Falls back to the raw extremes only
-// when no real cycle is available yet (initial load).
 function realCycleExtremes(cycles, ideal, fallback) {
   const id = Number(ideal) > 0 ? Number(ideal) : 15;
   const lo = id * 0.5;      // phantom floor (scan-fail warm-up, ~5-8s)
@@ -198,8 +160,6 @@ const STATUS_CLR = {
   "IDLE":          "#94a3b8",
   "RUNNING":       "#22c55e",
   "BREAKDOWN":     "#ef4444",
-  // 2026-10-07 — andon calls show their own name: Maintenance (red, it IS the
-  // breakdown call) and Toolroom (pink) — both still count as breakdown loss.
   "MAINTENANCE":   "#ef4444",
   "TOOLROOM":      "#ec4899",
   "QUALITY ISSUE": "#f97316",
@@ -244,8 +204,6 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
       return;
     }
 
-    // Demo page 2: x-axis capped at 40 s (was up to 60 s).  Buckets are
-    // filled densely at 0.1 s so the 5 s tick labels land on real slots.
     const MAX_CT = 40;
     const byCt = new Map(data.buckets.map(b => [Math.round(b.ct * 10), b.count]));
     const loK  = Math.round(Math.min(...data.buckets.map(b => b.ct)) * 10);
@@ -254,9 +212,6 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
     const labels  = buckets.map(b => b.ct.toFixed(1));
     const counts  = buckets.map(b => b.count);
 
-    // Bar colour per bucket — green below ideal, amber on, red above.
-    // Peak bucket shows in solid yellow regardless so the operator can
-    // locate the operating mode at a glance.
     const peak   = data.peak_bucket;
     const colors = buckets.map(b => {
       if (Math.abs(b.ct - peak) < 0.05) return "#fbbf24";
@@ -336,9 +291,6 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
           const xScale = chart.scales.x;
           const yScale = chart.scales.y;
           const ctx = chart.ctx;
-          // 2026-05-18-r11 — theme-aware fill colors so the "ideal"
-          // and "median" labels are readable in light mode (amber on
-          // white was too pale; switched to dark amber).
           const idealColor  = D ? "#fbbf24" : "#b45309";
           const idealStroke = D ? "rgba(251,191,36,0.75)" : "rgba(180,83,9,0.85)";
           const medColor    = D ? "#a855f7" : "#7e22ce";
@@ -363,11 +315,6 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
             ctx.restore();
           }
 
-          // ── 2026-05-18-r9 — Median CT vertical guide ──
-          // Operator spec from sample.docx: "Monthly histographical
-          // graoh ith median ct line".  Walk buckets in ct order,
-          // accumulate counts, mark the bucket where cumulative count
-          // crosses 50% of total — that ct is the population median.
           const allB  = [...data.buckets].sort((a, b) => a.ct - b.ct);
           const total = allB.reduce((a, b) => a + b.count, 0);
           if (total > 0) {
@@ -449,15 +396,6 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
   );
 }
 
-// ─── Mini production bar chart for the 9:16 quad grid (r9) ───────
-// One reusable Chart.js wrapper for Weekly + Monthly mini-views in
-// the portrait 2×2 chart panel.  `mode` controls aggregation:
-//   "weekly"  — rolling last 7 days, each bar = that day's own total
-//               (non-cumulative).  Maps the operator's sample.docx box
-//               "Weekly Graph plan vs actual no cummulative".
-//   "monthly" — current month, week-wise cumulative (W1, W1+W2, ...).
-//               Maps "Monthly plan va actual cumulative ok".
-// Plan = blue dashed reference line, Actual = green/red bars.
 function MiniProductionChart({ mode, history, dark, chartReady }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
@@ -504,28 +442,15 @@ function MiniProductionChart({ mode, history, dark, chartReady }) {
       }
     }
 
-    // 2026-05-18-r11 — Colour palette change per operator spec:
-    // "weekly monthly graph ki target line ka colour red yellow kr de
-    // or actual ka green kr do".  Bars ALWAYS green (no longer
-    // red-on-shortfall), and the Plan/target line switches from
-    // blue → amber (#fbbf24, same yellow used for the ideal-CT
-    // reference line on the histogram so the operator's eye has a
-    // consistent "this is a target" cue across all four panels).
     const RUN  = "#22c55e";    // green — actual bars
     const AMB  = "#fbbf24";    // amber/yellow — plan/target line
     const txt  = dark ? "#c8d3e8" : "#1e293b";
     const txtMut = dark ? "#8092af" : "#475569";
     const grid = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
 
-    // Bars uniformly green (translucent fill + solid border for crisp
-    // edges).  Old behaviour painted RED when actual<plan, but the
-    // operator wants the Plan line itself to be the colour-coded
-    // reference — bars stay green regardless.
     const barColors  = barData.map(() => `${RUN}bb`);
     const barBorders = barData.map(() => RUN);
 
-    // r10 — value-on-bar plugin so the operator can read each day's
-    // actual count without hovering.  Tooltip kept for plan compare.
     const topLabelPlugin = {
       id: "miniTopLabels",
       afterDatasetsDraw(chart) {
@@ -641,14 +566,6 @@ function MiniProductionChart({ mode, history, dark, chartReady }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 2026-08-07 — WELD MONITOR tile.  One per machine on the line: draws that
-// machine's weld CURRENT and VOLTAGE trace with the spec band from
-// mes_weld_master.  Machines with no weld card configured render an empty
-// plot area instead — the operator asked to keep a slot for every machine so
-// the grid mirrors the line, and fill them in as cards get wired.
-// Read-only: the data comes from GET /api/weld/live, nothing is written.
-// ─────────────────────────────────────────────────────────────
 function WeldTile({ machineName, payload, chartReady, D, bgDeep, border, text, textSub, textMut }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
@@ -693,7 +610,6 @@ function WeldTile({ machineName, payload, chartReady, D, bgDeep, border, text, t
           x: { ticks: { color: textMut, font: { size: 8 }, maxTicksLimit: 6 },
                grid:  { color: D ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.05)" } },
           yA: { position: "left",
-                // Keep the spec window visible even when the trace sits inside it.
                 suggestedMin: spec?.current?.min != null ? Number(spec.current.min) - 40 : undefined,
                 suggestedMax: spec?.current?.max != null ? Number(spec.current.max) + 60 : undefined,
                 ticks: { color: "#38bdf8", font: { size: 8 } },
@@ -742,10 +658,6 @@ function WeldTile({ machineName, payload, chartReady, D, bgDeep, border, text, t
 
 // ─────────────────────────────────────────────────────────────
 export default function Management2() {
-  // 2026-08-11 — the URL may be "/fullscreen/YHB-SS.MANAGEMENT" or the plain
-  // numeric id.  Numeric is used as-is (no extra request), so every existing
-  // bookmark and wall display is untouched; a named URL costs one tiny
-  // anonymous lookup, and the backend strips the ".MANAGEMENT" suffix itself.
   const { lineId: urlLineRef } = useParams();   // `lineRef` is taken (a useRef below)
   const [resolvedId, setResolvedId] = useState(
     /^\d+$/.test(urlLineRef || "") ? urlLineRef : null);
@@ -760,39 +672,11 @@ export default function Management2() {
   }, [urlLineRef]);
   const lineId = resolvedId;
   const [dark, setDark]      = useState(() => localStorage.getItem("fs_theme") !== "light");
-  // Orientation — "portrait" (9:16 grid) vs "landscape" (16:9 grid).
-  //
-  // 2026-05-18-r8 — TWO-AXIS ORIENTATION MODEL.
-  //
-  // The previous revisions kept conflating two distinct ideas:
-  //   (a) LAYOUT type  — which CSS grid template renders (3-col×6-row
-  //       portrait vs 1-col×4-row landscape).  Picked by `isPortrait`.
-  //   (b) ROTATION     — whether to CSS-rotate the entire dashboard
-  //       90° so it can fill a vertically-mounted screen whose OS
-  //       still publishes a landscape viewport.  Picked by
-  //       `needsRotation` (further below).
-  //
-  // The natural mapping for (a) is: viewport portrait → portrait
-  // layout, viewport landscape → landscape layout.  No rotation is
-  // needed when the layout already matches the viewport's shape; the
-  // grid fills the viewport naturally.
-  //
-  // Rotation only kicks in when there's a MISMATCH between the
-  // operator-selected layout and the viewport shape — i.e. the user
-  // toggled to portrait layout while their browser is still landscape
-  // (because their 16:9 screen is mounted vertically and OS hasn't
-  // auto-rotated the viewport).  This covers the operator's previous
-  // "16:9 CALL KRU TOH POTRAIT VAALA AAYE" request without forcing
-  // every desktop dev to see sideways content.
   const _detectOrient = () =>
     (typeof window !== "undefined" && window.innerHeight > window.innerWidth)
       ? "portrait" : "landscape";
   const [orientation, setOrientation] = useState(_detectOrient);
   const isPortrait = orientation === "portrait";
-  // 2026-09-07 — LAN interactive-panel build only (&lan=1 marker, persisted to
-  // sessionStorage by getApkInfo): give the lower chart band (Weekly Plan-vs-
-  // Actual + CT Distribution) more height. No effect on phones / the internet
-  // app / any other page.
   const isLanPanel = (() => { try { return sessionStorage.getItem("tbdi_lan") === "1"; } catch { return false; } })();
 
   // Live viewport tracking — needed to compute `needsRotation` below.
@@ -801,22 +685,8 @@ export default function Management2() {
   const [viewportPortrait, setViewportPortrait] = useState(() =>
     typeof window !== "undefined" && window.innerHeight > window.innerWidth);
 
-  // Rotation flag: true only when the operator-selected layout
-  // direction is the OPPOSITE of the viewport's natural orientation.
-  // - viewport landscape + isPortrait=true  → rotate (vertical-mount case)
-  // - viewport portrait  + isPortrait=false → rotate (manual landscape on portrait browser)
-  // - everything else: layout fits viewport natively, no rotation.
   const needsRotation = isPortrait !== viewportPortrait;
 
-  // 2026-05-18-r13 — Auto-correct orientation ONLY when the viewport
-  // actually FLIPS shape (landscape↔portrait).  Earlier this ran on
-  // every resize event, including same-shape resizes (scrollbar
-  // appear, devtools open, browser frame nudge…), which then
-  // overwrote the operator's manual toggle: "toggle krta hu to ye h
-  // jata h vertical se landscape".  Now the ref tracks the last
-  // observed viewport shape; orientation only auto-snaps when the
-  // shape genuinely flips.  Manual toggles survive indefinitely
-  // (until the operator rotates the screen / window).
   const prevVpShapeRef = useRef(
     typeof window !== "undefined" && window.innerHeight > window.innerWidth);
   useEffect(() => {
@@ -861,13 +731,7 @@ export default function Management2() {
   const [lossBreakup,   setLossBreakup]   = useState(null);
   const [lossLoading,   setLossLoading]   = useState(false);
 
-  // 2026-05-13 — Poka-Yoke turned into a compact green/red status button.
-  // Click → modal that lists every PY failure event of the current shift,
-  // grouped by hourly slot.  Same UX pattern as the Loss-breakup modal.
   const [pyModalOpen,    setPyModalOpen]    = useState(false);
-  // 2026-08-07 — Weld Monitor overlay (Recliner).  `weldData` is keyed by
-  // machine_name; a machine missing from the map has no weld card wired and
-  // renders an empty plot.  Loaded only while the overlay is open.
   const [weldOpen,       setWeldOpen]       = useState(false);
   const [weldData,       setWeldData]       = useState({});
   const [weldLoading,    setWeldLoading]    = useState(false);
@@ -878,40 +742,14 @@ export default function Management2() {
   const [pyEvents,       setPyEvents]       = useState(null);
   const [pyEventsLoading,setPyEventsLoading]= useState(false);
 
-  // 2026-05-13 — Sensor Status button + modal, same UX as PY.
-  // Backend already publishes a passive X-bit health snapshot every 10 s
-  // via /api/poka-yoke/sensor-sweep/<line_id> — see SENSOR SWEEP block in
-  // routers/poka_yoke.py.  Each entry has a `status` field:
-  //   "alive"  → sensor is toggling normally  (SENSING — green)
-  //   "stuck"  → no toggle for >threshold     (DESENSED — red)
-  // Card polls every 10 s in background; modal opens current snapshot.
   const [sensorSweep,    setSensorSweep]    = useState(null);
   const [sensorModalOpen,setSensorModalOpen]= useState(false);
 
-  // ── Shift min/max cycle box ────────────────────────────────────
-  // 2026-05-15 — Department review asked for a side box showing the
-  // shift's slowest + fastest cycles with click → part_code + time +
-  // video.  Backend resolves the actual cycle rows via the
-  // /cycle-extremes endpoint (uses the line's ct_log table), so the
-  // numbers shown here ALWAYS map to a real cycle, never stale aggregate.
   const [extremes, setExtremes] = useState(null);  // {min:{...}, max:{...}}
-  // 2026-06-10 — The MIN/MAX chips must point at a cycle whose video CLIP
-  // actually plays.  Resolved async by probing /cycle-video (see effect below);
-  // until then the chips fall back to the band-based realCycleExtremes().
   const [chipMin, setChipMin] = useState(null);
   const [chipMax, setChipMax] = useState(null);
   const videoProbeRef = useRef(new Map());   // cycle_seq -> has-real-clip (bool)
 
-  // ── Header machine list (2026-05-16) ──────────────────────────
-  // Operator wants the yellow header pill to show the MAIN machine's
-  // name + (machine_seq), with a click to toggle/cycle through other
-  // machines on this line (jump to their sub-machine fullscreen).
-  // machine_seq is the M-N badge admin assigns in PLC Config.
-  //
-  // 2026-05-18 perf — seed from sessionStorage so the header pill paints
-  // instantly on reload instead of waiting for /api/lines/{id}/machines
-  // (which can be 1-2 s on a saturated LAN).  Background fetch still
-  // refreshes the list, but the user never sees an empty header.
   const [machines,       setMachines]       = useState(() => {
     try {
       const raw = sessionStorage.getItem(`mes:fs:machines:line:${lineId}`);
@@ -920,15 +758,7 @@ export default function Management2() {
     } catch { return []; }
   });
   const [machineMenuOpen,setMachineMenuOpen]= useState(false);
-  // 2026-07-13 — Zone line-switcher (YWD/2UA only): when this line belongs
-  // to the YWD/2UA zone, the header MACHINE pill turns into a LINE switcher
-  // listing every active line in that zone so the operator can hop between
-  // lines.  Empty for every other zone → header keeps the sub-machine menu.
   const [zoneLines,      setZoneLines]      = useState([]);
-  // 2026-09-13 — Loop Pipe line-switcher: when THIS line is a Loop Pipe line
-  // the header line-NAME text turns into a dropdown listing every Loop Pipe
-  // line so the wall can switch between them. Empty for every other line →
-  // the line name renders as plain text exactly as before.
   const [loopLines,      setLoopLines]      = useState([]);
   const [loopMenuOpen,   setLoopMenuOpen]   = useState(false);
   const navigate                            = useNavigate();
@@ -936,9 +766,6 @@ export default function Management2() {
   const [rt,   setRt]        = useState(null);
   const [line, setLine]      = useState(null);
   const [connected, setConn] = useState(false);
-  // 2026-09-14 — set when /realtime answers 404 = this line has no live
-  // dashboard table (never provisioned). We render a clear "not configured"
-  // screen instead of spinning on "CONNECTING…" forever + reload-looping.
   const [notProvisioned, setNotProvisioned] = useState(false);
   const [now,  setNow]       = useState(demoNow());
   const [liveView, setLiveView] = useState(null);   // "camera" | "collector" popup
@@ -950,34 +777,18 @@ export default function Management2() {
   const lastCtRef   = useRef(null);
   const rtRef       = useRef(null);
   const lastPokaRef = useRef(null);
-  // 2026-09-14 — mirrors `notProvisioned` for use inside interval closures
-  // (which capture stale state). When true, the child pollers below skip so an
-  // unprovisioned line stops hammering endpoints that only 404/500 for it.
   const notProvRef  = useRef(false);
 
   // ── CMS Camera cycle data ─────────────────────────────────────
   const [cmsData,      setCmsData]      = useState([]);
   const [cmsLoading,   setCmsLoading]   = useState(false);
-  // 2026-06-08 — real per-slot NG from /ng-list (ct_log is_ng, incl. scan-fail
-  // ERROR cycles that /ct-history omits) so hourly table matches ct_log + D102.
   const [ngEvents,     setNgEvents]     = useState([]);
   const [ngLoaded,     setNgLoaded]     = useState(false);
   const [videoModal,   setVideoModal]   = useState(null);
-  // 2026-05-31 — Replace the browser's native HTML5 buffering spinner
-  // (the round throbber that shows while a cycle clip is still loading)
-  // with a "Please wait while loading" text card.  Operator request:
-  // text instead of the spinning ring.  Pure UI overlay — set on
-  // loadstart/waiting/seeking, cleared on playing/canplay.
   const [videoBuffering, setVideoBuffering] = useState(false);
-  // 2026-08-11 — elapsed wait, shown live and logged to the Waiting Time page.
   const [vidWait, setVidWait] = useState(0);
   const vidTimerRef = useRef(null);
   const vidSrcRef   = useRef(null);               // promise of X-Clip-Source
-  // 2026-08-12 — elapsed is computed from the moment the clip was OPENED, not
-  // accumulated by the ticker.  `videoBuffering` flips true/false several times
-  // per clip (loadstart, waiting, stalled, seeking) and the old ticker added
-  // 0.1 on every tick, so the number carried across those flips — the operator
-  // saw "19.7s" on a clip that had been open a couple of seconds.
   const vidWaitStart = useRef(0);
   useEffect(() => {
     if (!videoBuffering) return;
@@ -988,12 +799,7 @@ export default function Management2() {
     }, 100);
     return () => clearInterval(t);
   }, [videoBuffering]);
-  // 2026-05-21 — Slot NG list modal.  Holds {slot, date} when the user
-  // clicks the NG count cell in the slot table.  Null = closed.
   const [ngListModal,  setNgListModal]  = useState(null);
-  // 2026-05-22 — Loss-remark modal.  Holds {date, shift_name, slot_label,
-  // loss_type, loss_label, loss_color, loss_secs} when production clicks
-  // a loss cell in the Hourly Loss Breakup modal.  Null = closed.
   const [lossRemarkModal, setLossRemarkModal] = useState(null);
   // Timeline hover tooltip — rendered at root level to avoid overflow:hidden clipping
   const [tlTip, setTlTip] = useState(null); // {x, y, status, times, dur, color}
@@ -1004,8 +810,6 @@ export default function Management2() {
   const [pipActive,    setPipActive]    = useState(false);
   const [showModalUI,  setShowModalUI]  = useState(false); // visibility of the modal chrome
   const videoElRef     = useRef(null);
-  // Demo fix: closing the popup must also abort the clip download, or each closed
-  // clip keeps one of the browser's 6 connections busy and later clips queue behind it.
   const _abortVid = () => {
     const v = videoElRef.current;
     if (!v) return;
@@ -1059,11 +863,6 @@ export default function Management2() {
   // Primary storage: DB (mes_status_log) so all devices stay in sync.
   // localStorage is an immediate-render fallback (cleared on shift change).
   const statusLogRef  = useRef([]);
-  // 2026-05-16 — bumped to v2 so any browser still holding the v1
-  // localStorage payload (entries written by the now-removed frontend
-  // POST path) ignores the old cache automatically.  v1 key never gets
-  // touched again, so it's effectively orphaned and dies on browser
-  // cache eviction.  v2 is server-fed only.
   const statusLogKey  = `mes_slog_v2_${lineId}`;
   const lastStatusRef = useRef(null);  // last recorded status (change-detector + dedup)
   // Debounce — only commit a status change after the new value has held
@@ -1079,24 +878,12 @@ export default function Management2() {
   const [histLoading, setHistLoading] = useState(false);
   const [pokaStatus,  setPokaStatus]  = useState([]);
 
-  // 2026-05-18-r11 — Portrait FORCES chartMode = "ct".
-  // The portrait 3-row quad layout shows CT graph + Weekly + Monthly
-  // + Histogram all simultaneously — the chartMode toggle (which
-  // only appears in landscape) is hidden.  If the operator was on
-  // any non-"ct" mode in landscape and rotates to portrait, the
-  // cmsChartInst build effect short-circuits (its guard is
-  // `chartMode !== "ct"` → return), so the CT canvas in the quad's
-  // top row stays empty and dot-click → video is dead.  Force "ct"
-  // whenever isPortrait flips on so the chart always builds.
   useEffect(() => {
     if (isPortrait && chartMode !== "ct") {
       setChartMode("ct");
     }
   }, [isPortrait, chartMode]);
 
-  // CT distribution histogram (last-30-day 0.1s buckets).  Populated only
-  // when chartMode === "histogram" so we don't poll when the operator
-  // isn't looking at it.  Refresh every 30 s when active.
   const [ctHistogram, setCtHistogram] = useState(null);
 
   // ── FY selector ──────────────────────────────────────────────
@@ -1126,15 +913,6 @@ export default function Management2() {
     return years.slice(0, 3).map(y => ({ value: y, label: `FY${String(y).slice(-2)}-${String(y+1).slice(-2)}` }));
   })();
 
-  // ── Mount: WIPE any stale localStorage cache ─────────────────────
-  // 2026-05-15 17:15 — Department review aftermath.  Earlier the frontend
-  // POSTed its own status guesses to mes_status_log and ALSO cached them
-  // in localStorage.  Even after collector became the sole writer +
-  // server data was cleaned, browsers kept rendering the stale garbage
-  // from their own localStorage on next page load.  Nuke that cache on
-  // every mount — server is the only source of truth now.  Also nuke
-  // the legacy v1 key so the orphaned blob doesn't sit around forever
-  // confusing future-me when debugging localStorage.
   useEffect(() => {
     try {
       localStorage.removeItem(statusLogKey);
@@ -1193,30 +971,10 @@ export default function Management2() {
   // auto-reloads the page if this goes stale → self-healing TV.
   const lastGoodPollRef = useRef(Date.now());
 
-  // ── 2026-08-20 — "Offline" means STALE DATA, not one failed request ──
-  // The badge used to flip on a single failed fetch, so on the LAN wall
-  // panels one dropped keep-alive painted the whole dashboard "Offline"
-  // while the line, the collector and the API were all fine (the browser on
-  // the server never showed it -- its socket was already established).
-  // Judge freshness instead of the last request: as long as a poll succeeded
-  // within STALE_OFFLINE_MS we are still Live, however the individual
-  // requests fail or cluster.  The 30 s watchdog below still reloads a truly
-  // dead page, so a real outage surfaces here first and then self-heals.
-  // 2026-08-22 — operator raised this 15 s -> 30 s.  It now matches the
-  // watchdog below, so the badge turns "Offline" and the self-heal reload
-  // fire at the same age: the panel shows Offline only in the moment
-  // before it reloads itself.
   const STALE_OFFLINE_MS = 30000;
 
   // ── Realtime fetch every 3s ──────────────────────────────────
   const fetchData = useCallback(async () => {
-    // 2026-09-14 — Load the line record INDEPENDENTLY of /realtime. Previously
-    // both were fetched in one Promise.all, so a /realtime failure (e.g. an
-    // unprovisioned sub-assembly line that 404s) threw before setLine() ran —
-    // leaving both rt AND line null, which pinned the wall on "CONNECTING…"
-    // forever while the stale-data watchdog reloaded the page every 30s (an
-    // endless reload loop = "dashboard won't open"). Now the line always loads
-    // and a realtime 404 is handled as a clean "not configured" state.
     if (!lineRef.current) {
       try {
         const lineRes = await api.get(`/api/lines/${lineId}`);
@@ -1255,17 +1013,6 @@ export default function Management2() {
     return () => clearInterval(t);
   }, [fetchData]);
 
-  // ── Stale-data watchdog: shop-floor TV must self-heal ─────────
-  // 2026-06-01 — Backend + Vite proxy are proven bulletproof (50
-  // concurrent /realtime → all 200 in <30ms), so a frozen count is
-  // ALWAYS a wedged BROWSER connection pool (stuck video stream / OS
-  // socket cap / HMR drop), never the server.  When it wedges, the 3s
-  // poll can't grab a socket, the count sticks on its last value and
-  // the badge shows "Offline" — and till now a human had to hit refresh.
-  // This reloads the page after 30s with no good poll, which drops the
-  // wedged sockets and resumes LIVE counting with ZERO human touch.  A
-  // healthy dashboard refreshes lastGoodPollRef every 3s so it NEVER
-  // trips.  Counting is 100% backend, so a reload can't lose a count.
   useEffect(() => {
     const STALE_MS = 30000;
     const t = setInterval(() => {
@@ -1279,15 +1026,6 @@ export default function Management2() {
     return () => clearInterval(t);
   }, []);
 
-  // ── Machines list (refresh every 60 s) ───────────────────────
-  // Drives the header machine pill + its toggle dropdown.  60 s is
-  // fine — admins don't change machine names on the fly during a
-  // shift, and machine_seq edits propagate via the next poll.
-  // 2026-08-07 — Weld Monitor loader.  Reads mes_weld_master to learn which
-  // of this line's machines actually have a weld card, then pulls each one's
-  // trace from /api/weld/live.  Machines absent from the master are simply
-  // never fetched — their tile stays blank.  Runs only while the overlay is
-  // open so the dashboard's normal polling is untouched.
   useEffect(() => {
     if (!weldOpen) return;
     let alive = true;
@@ -1320,9 +1058,6 @@ export default function Management2() {
     return () => { alive = false; };
   }, [weldOpen, lineId]);
 
-  // 2026-08-07 — PM Check loader.  One read-only call; the endpoint does the
-  // week math against the maintenance yearly plan and returns per-machine
-  // status. Loaded only while the overlay is open.
   useEffect(() => {
     if (!pmOpen) return;
     let alive = true;
@@ -1359,11 +1094,6 @@ export default function Management2() {
     return () => { alive = false; clearInterval(t); };
   }, [lineId]);
 
-  // ── Zone line-switcher list (YWD/2UA only) ───────────────────
-  // 2026-07-13 — One /api/lines fetch; if THIS line's zone is 'YWD/2UA',
-  // expose every active line in that zone for the header LINE switcher.
-  // Any other zone → zoneLines stays [] and the header keeps its normal
-  // sub-machine menu, so no other zone's behaviour changes.
   useEffect(() => {
     let alive = true;
     api.get(`/api/lines`).then(r => {
@@ -1382,12 +1112,6 @@ export default function Management2() {
     return () => { alive = false; };
   }, [lineId]);
 
-  // ── Loop Pipe line-switcher list (Loop Pipe lines only) ──────
-  // 2026-09-13 — One /api/lines fetch; if THIS line is a Loop Pipe line
-  // (db_table_name starts with 'loop_pipe', the same marker the backend uses),
-  // expose every active Loop Pipe line for the header line-NAME dropdown.
-  // Any other line → loopLines stays [] and the line name is plain text, so
-  // no other line's behaviour changes.
   useEffect(() => {
     let alive = true;
     const isLoop = (l) =>
@@ -1408,11 +1132,6 @@ export default function Management2() {
     return () => { alive = false; };
   }, [lineId]);
 
-  // ── Shift min/max cycle (every 15s) ──────────────────────────
-  // 2026-05-15 — Polled separately from /realtime because the backend
-  // query is heavier (two ORDER BY scans on ct_log) and the values
-  // only change when a new extreme cycle finishes — no need to fetch
-  // every 3 s like the live KPI strip.
   useEffect(() => {
     let cancelled = false;
     const pullExtremes = async () => {
@@ -1430,16 +1149,6 @@ export default function Management2() {
     return () => { cancelled = true; clearInterval(t); };
   }, [lineId]);
 
-  // Build a video URL for a cycle row (same pattern as in-chart click).
-  // Used by min/max cards so click → same video modal experience.
-  // A <video> tag never exposes response headers, so ask for one byte and read
-  // X-Clip-Source off that — tells the Waiting Time page whether the clip came
-  // off the archive or was transcoded on the click.
-  // 2026-09-18 — Defined at COMPONENT scope so the <video onLoadStart> handler
-  // down in render can call it.  It used to be a local const inside
-  // openCycleVideo, so render threw "_probeSrc is not defined" every time the
-  // video modal opened and the probe never ran at all.  WallboardLeft hit this
-  // exact bug and was fixed the same way; this page was missed.
   const _probeSrc = useCallback((u, el) => {
     try {
       // Kept as a promise: an archived clip starts playing long before this
@@ -1463,28 +1172,12 @@ export default function Management2() {
       .replace(/^_+|_+$/g, "");
     const recDate = rtRef.current?.record_date || new Date().toISOString().slice(0,10);
     const shiftNm = rtRef.current?.shift_name || cy.shift_name || "";
-    // 2026-08-11 — `ng` names the row that was clicked (Alarm and OK rows can
-    // share a cycle_seq).  For an Alarm the server returns ONE continuous clip
-    // covering the Alarm plus the cycle after it.
     const qs = `date=${recDate}&shift=${encodeURIComponent(shiftNm)}&cycle_seq=${cy.cycle_seq || ""}`
              + `&ng=${cy.is_ng ? 1 : 0}`;
-    // 2026-05-27 — Operator: "ek video sab pe chal rhi h".  When the
-    // scanner is off / many cycles share one part_code, the by-part
-    // MP4 returns the SAME file every click.  Always use the cycle_seq
-    // time-window endpoint instead — each cycle's timestamp produces
-    // its own unique clip from the rolling TS file.  Cache-buster
-    // ensures the browser doesn't reuse an earlier cycle's stream.
     const videoSrc =
       `/api/lines/${lineId}/cycle-video?${qs}`
       + `&t=${cy.cycle_seq || Date.now()}`
       + `&token=${encodeURIComponent(sessionStorage.getItem("mes_token")||"")}`;
-    // 2026-06-01 — Older dots: the live /cycle-video cut only works while the
-    // rolling camera TS still holds this cycle's timestamp (TS is wiped at
-    // every shift boundary), so older cycles 404 there.  Pre-build the
-    // PERMANENT archive-clip URL (D:\VideoArchive via mes_video_archive) so
-    // the <video> onError 404 handler can transparently fall back to it.
-    // machine_seq=0 = main Final-Inspection line.  Recent dots never reach
-    // the fallback (live cut succeeds) -> zero change to existing behaviour.
     const archiveSrc =
       `/api/lines/${lineId}/archive-video?${qs}&machine_seq=0`
       + `&t=${cy.cycle_seq || Date.now()}`
@@ -1507,14 +1200,7 @@ export default function Management2() {
       _seek_offset: 0,  // populated after metadata fetch
     });
     setShowModalUI(!pipActive);
-    // 2026-05-28 — Probe response headers for X-Video-Offset.  When 4
-    // NGs share one by-part MP4, each one opens at its own moment
-    // (offset = NG.ts - prev_OK.ts).  Time-window clips return 0.
     if (cy.is_ng) {
-      // 2026-06-01 LEAK FIX — body.cancel() + 4s abort so this header-only
-      // probe can NEVER hold an HTTP/1.1 connection open.  Un-consumed fetch
-      // bodies were piling up past the browser's 6-per-origin limit and
-      // starving the 3s /realtime poll → dashboard stuck on "Offline".
       const _ngCtrl = new AbortController();
       const _ngTmo = setTimeout(() => _ngCtrl.abort(), 4000);
       fetch(videoSrc, { method: "GET", headers: { Range: "bytes=0-0" }, signal: _ngCtrl.signal })
@@ -1532,11 +1218,6 @@ export default function Management2() {
     }
   }, [lineId, pipActive]);
 
-  // 2026-05-28 — Apply seek when BOTH the offset has been fetched
-  // (from X-Video-Offset header) AND the video metadata has loaded
-  // (we know the duration).  Whichever arrives last fires this effect.
-  // Used for the multi-NG-same-cycle case where 4 NG rows share one
-  // big by-part MP4 and each opens at its own moment within it.
   useEffect(() => {
     const off = videoModal?._seek_offset || 0;
     const meta = videoModal?._meta_loaded;
@@ -1549,22 +1230,6 @@ export default function Management2() {
     }
   }, [videoModal?._seek_offset, videoModal?._meta_loaded]);
 
-  // ── Record status change → localStorage + DB ─────────────────
-  // 2026-05-15 — DEPARTMENT REVIEW FIX.  Frontend NO LONGER writes
-  // to mes_status_log.  The collector reads the PLC status bit at
-  // 30 ms cadence and is now the SINGLE source of truth for the
-  // timeline.  Multiple open dashboards (operator HMI + supervisor
-  // LCD + manager laptop + etc.) each had their own 3 s poll cadence
-  // + debounce + clock skew, and EACH was POSTing its interpretation
-  // of `operating_status` — different tabs saw different transient
-  // PLC-ladder values, so the timeline filled with phantom IDLE /
-  // BREAKDOWN / BREAK chunks even while production count incremented
-  // normally.
-  //
-  // Frontend now READS-ONLY from /api/lines/<id>/status-log on
-  // initial mount; the periodic timeline refresh below (every 10 s)
-  // re-pulls fresh server data so all dashboards stay in sync with
-  // the collector's authoritative writes.
   const STATUS_DEBOUNCE_MS = 6000;  // kept as reference value (no longer used for writes)
   useEffect(() => {
     if (!rt || !line) return;
@@ -1585,11 +1250,6 @@ export default function Management2() {
   useEffect(() => {
     if (!lineId) return;
     let cancelled = false;
-    // During GAP_AB / GAP_BA the backend's shift_name is "GAP_*" but
-    // the timeline must still display the PREVIOUS real shift's
-    // entries (A or B).  Derive the underlying shift letter from
-    // either prevShiftRef (set after a real shift was observed) or
-    // the GAP code itself (GAP_AB → A, GAP_BA → B).
     const resolveShift = () => {
       const cur = rtRef.current?.shift_name || "";
       if (cur && !cur.startsWith("GAP")) return cur;
@@ -1680,16 +1340,6 @@ export default function Management2() {
     return () => clearInterval(t);
   }, [lineId]); // eslint-disable-line
 
-
-  // ── Sensor sweep poll (10 s) ────────────────────────────────
-  // 2026-05-14 — switched from raw `/sensor-sweep/` (which returned
-  // whatever the collector last POSTed, often empty) to the new
-  // `/sensor-health/` endpoint that ALWAYS returns one entry per
-  // applicable PY of the current model, with status derived from the
-  // sweep cache when present and "unknown" otherwise.  Net result: the
-  // sensor modal shows the configured list immediately, the operator
-  // never sees "0 sensors" again, and as soon as the collector publishes
-  // its first row the statuses flip from unknown → alive/stuck.
   useEffect(() => {
     let alive = true;
     const fetchSweep = () => {
@@ -1753,7 +1403,6 @@ export default function Management2() {
     return () => { alive = false; clearInterval(t); };
   }, [lineId]);
 
-
   // ── Cycle time log — auto-polls backend every 8s ─────────
   useEffect(() => {
     if (chartMode !== "ct" || !rt) return;
@@ -1772,10 +1421,6 @@ export default function Management2() {
       if (first) setCmsLoading(true);
       api.get(`/api/lines/${lineId}/ct-history?date=${recDate}&shift=${encodeURIComponent(shift)}`)
         .then(res => {
-          // 2026-06-10 — drop phantom cycles (CT < half ideal) from the CYCLE
-          // TIME graph + counts: 08:30 warm-up scan-fail rows the PLC register
-          // never counts (implausibly fast).  Live demo: half of the machine's
-          // own ideal CT (Machine Config), not the old fixed 7.5 s.
           const minCt = (Number(rtRef.current?.cycle_time_plan) || 15) / 2;
           setCmsData(
             (Array.isArray(res.data) ? res.data : []).filter(c => {
@@ -1791,16 +1436,6 @@ export default function Management2() {
     return () => clearInterval(t);
   }, [chartMode, rt?.shift_name, rt?.record_date, lineId]); // eslint-disable-line
 
-  // ── 2026-06-10 — Resolve MIN / MAX chips to a cycle whose clip PLAYS ──
-  // The backend /cycle-extremes min is a scan-fail PHANTOM (0.38s) and its max
-  // is a stop/restart GAP (100-700s) — neither is a real cycle.  Even among
-  // real cycles, an old/over-written one has no live clip: /cycle-video then
-  // returns a ~261-byte placeholder.  And the shift-startup mega-gaps (08:3x
-  // warm-up spanning minutes) aren't real cycles either.  So: walk inward from
-  // each extreme over the plausible band and keep the FIRST candidate whose
-  // clip is real (range request body > a few KB).  Startup gaps are excluded
-  // from MAX so it lands on the genuine slowest mid-shift event.  Probe results
-  // are cached per cycle_seq, so the 8 s refresh never re-cuts the same clip.
   useEffect(() => {
     if (!Array.isArray(cmsData) || cmsData.length === 0) {
       setChipMin(null); setChipMax(null); return;
@@ -1855,13 +1490,6 @@ export default function Management2() {
     return () => { cancelled = true; };
   }, [cmsData, lineId, line?.plc_config?.ideal_cycle_time, rt?.record_date, rt?.shift_name, rt?.shift_start_time]); // eslint-disable-line
 
-  // ── 2026-06-08 — Per-slot NG events (real ct_log is_ng) ───────────
-  // /ct-history (cmsData) OMITS scan-fail ERROR cycles, so its is_ng
-  // under-counts NG; _distribute then SCALES that short shape up to the PLC
-  // total, producing junk per-slot NG (e.g. 1/0/3/5 -> 2/0/5/8).  Pull the
-  // authoritative NG list straight from ct_log via /ng-list (whole-day window)
-  // and bucket it by ts below, so per-slot NG matches ct_log + D102 exactly.
-  // Independent of chartMode (the hourly table always needs it).
   useEffect(() => {
     if (!rt) return;
     const recDate = rt.record_date || new Date().toISOString().slice(0, 10);
@@ -1893,15 +1521,6 @@ export default function Management2() {
       .finally(() => setHistLoading(false));
   }, [chartMode, lineId]);
 
-  // ── 2026-05-18-r9 — QUAD-PANEL history (portrait only) ────────
-  // The 2×2 portrait layout shows Weekly + Monthly side-by-side, both
-  // derived from the same 90-day production_history pull (Weekly slices
-  // the last 7 days; Monthly groups current month by week).
-  // 2026-06-17 — now AUTO-REFRESHED every 30 s (was a one-shot per shift
-  // change).  Without the timer the portrait Daily/Weekly bars froze at
-  // their first-fetched value — operator: "9:16 mein 335 hi dikhata hai
-  // jabki 500 ho gaye".  16:9 dodged this because a Daily/Weekly toggle
-  // re-fetched `history`; portrait has no toggle, so it needs the timer.
   const [quadHistory, setQuadHistory] = useState(null);
   useEffect(() => {
     if (!isPortrait) return;
@@ -1914,13 +1533,6 @@ export default function Management2() {
     return () => clearInterval(t);
   }, [isPortrait, lineId, rt?.record_date]);
 
-  // ── CT distribution histogram — fetched + refreshed only when active ─
-  // 2026-05-18 — Moved from the (now-deleted) Summary wallboard.  Shows
-  // the 0.1 s-bucket density of every cycle in the last 30 days so the
-  // supervisor can see the operating range at a glance.  Backend caps
-  // ct_value to 0-60 s so a 600 s outlier doesn't flatten the X axis.
-  // Fires when chartMode === "histogram" (16:9 toggle) OR always in 9:16
-  // portrait (where the histogram is its own card at outer-grid row 4).
   useEffect(() => {
     if (chartMode !== "histogram" && !isPortrait) return;
     let alive = true;
@@ -1962,19 +1574,6 @@ export default function Management2() {
     let alive = true;
     const fetchEvents = (initial = false) => {
       if (initial) setPyEventsLoading(true);
-      // 2026-05-16 — switched to server-side episode builder.  Old
-      // /events?limit=500 path:
-      //   (a) capped at 500 → high-frequency PYs (e.g. D401's 300+
-      //       events/shift) crowded out other PYs entirely
-      //   (b) shipped raw events, frontend had to re-parse + group
-      //   (c) modal showed only what /events returned in current page
-      // New /bypass-episodes endpoint:
-      //   (a) returns ALL episodes for current shift (no cap)
-      //   (b) groups events into start/end episodes per py_no
-      //   (c) attributes each episode to its hourly slot
-      //   (d) persists the result to a local JSON file for audit + DR
-      //   (e) honors shift boundary: at shift end the file rotates;
-      //       during OT it keeps appending to the same shift's file
       const today = rt?.record_date || new Date().toISOString().slice(0,10);
       const sh    = rt?.shift_name || "";
       const qs    = `date=${today}${sh ? `&shift=${encodeURIComponent(sh)}` : ""}`;
@@ -2307,9 +1906,6 @@ export default function Management2() {
             callbacks:{
               title: items => chartTitle2 ? `${items[0].label}  (${chartTitle2})` : items[0].label,
               label: c => {
-                // 2026-06-04 — Operator: hover par US DIN ka apna plan+actual
-                // dikhe, running cumulative nahi (e.g. "2 Jun  Plan 3720 / Actual N").
-                // Har bar pehle se us din ka total hai, to seedha c.parsed.y dikhao.
                 return ` ${c.dataset.label}: ${c.parsed.y.toLocaleString()} pcs`;
               },
             },
@@ -2362,12 +1958,6 @@ export default function Management2() {
     const idealCT = line?.plc_config?.ideal_cycle_time || 15;
     const CT_TOL  = 0.009; // anything > ideal+0.009 = spike
 
-    // 2026-09-28 — Loop Pipe shows the Ideal line only.  Those lines run
-    // several processes off one register, so the DERIVED takt (working
-    // minutes / plan) sat a fraction below ideal and drew a second
-    // near-identical horizontal line that was read as cycle data.  The
-    // takt figure is still on the Takt Time card.  Matched by name so a
-    // future Loop Pipe line is covered without touching this file.
     const isLoopPipe = /^\s*loop\s*pipe/i.test(line?.line_name || "");
     const hideTakt = isLoopPipe;
 
@@ -2434,12 +2024,6 @@ export default function Management2() {
       },
     };
 
-    // ── Cycle number label on every dot ─────────────────────────
-    // 2026-05-18-r13 — In portrait mode the chart cell is smaller, so
-    // labeling EVERY cycle dot creates an unreadable wall of "33.63s
-    // 33.63s 33.63s …" stacked text (operator: "ye 33.63 kha se aa
-    // rha h").  Now: portrait labels only spikes (>ideal) + every
-    // 5th normal cycle.  Landscape behavior unchanged.
     const cycleLabelsPlugin = {
       id: "cycleLabels",
       afterDatasetsDraw(chart) {
@@ -2449,10 +2033,6 @@ export default function Management2() {
           const cy = visSlice[i];
           if (!cy) return;
           const isNg = !!cy.is_ng;
-          // Throttle labels in portrait — only NG + every 5th normal.
-          // 2026-05-27 — Dropped the >Ideal-CT spike highlighting:
-          // operator: "ng k liye jo ui tha vo sab shi kr".  OK cycles
-          // are now always plain green text regardless of CT length.
           if (isPortrait && !isNg && i % 5 !== 0) return;
           c.save();
           c.font = `${isNg ? 700 : 500} 8px 'Segoe UI',sans-serif`;
@@ -2468,32 +2048,11 @@ export default function Management2() {
       },
     };
 
-    // 2026-05-27 — Binary: OK = green (always), NG = red (always).
-    // Operator: ">ideal ct wala bhi red dikha rha tha jo confusing tha,
-    // sirf real NG hi red ho".  Earlier amber/red-on-OK was based on
-    // CT vs ideal, which made long-but-OK cycles look like NG.  Now
-    // colour purely tells you bit_type, CT goes in the label / tooltip.
     const ptColors = visSlice.map(cy =>
       cy.is_ng ? STATUS_CLR["BREAKDOWN"] : STATUS_CLR["RUNNING"]);
-    // 2026-05-27 — Radius keyed on is_ng (not CT-vs-ideal) so a long
-    // OK cycle stays the same size as a regular OK, and only NG dots
-    // stand out larger.
     const ptRadius = visSlice.map(cy => cy.is_ng ? 5 : 3);
     const ptHoverR = visSlice.map(cy => cy.is_ng ? 9 : 6);
 
-    // 2026-05-18-r7 — Y-AXIS HARD CAP at 40s.  Same fix that
-    // WallboardLeft.jsx got: a single 60s+ outlier was forcing the
-    // auto-scaled y-axis up to 70-80s, which squashed every normal
-    // 12-25s cycle into a flat band at the bottom of the chart.
-    // Operator complaint (Fullscreen 9:16): "SARI DOT DOT HI DIKH RHI
-    // H".  Clamp the plotted values at 40s; tooltip + dot-click stay
-    // on the REAL ct_value (so video URL + numeric readouts honor
-    // the true cycle time).
-    //  2026-09-28 — Operator: Loop Pipe ka graph 30s tak hi.  Its ideal is
-    //  9.5s, so a 40s ceiling left the band the cycles actually live in
-    //  squashed into the bottom quarter.  Everything else keeps 40s.
-    //  Cycles above the cap still plot at the ceiling with a white ring and
-    //  the tooltip reads the real value, exactly as it did at 40s.
     const Y_CAP   = isLoopPipe ? 30 : 40;
     const ptBorder  = visSlice.map(cy => cy.ct_value > Y_CAP
                                        ? "#ffffff"
@@ -2511,8 +2070,6 @@ export default function Management2() {
         datasets: [
           {
             label: "Cycle Time",
-            // 2026-05-18-r7 — plotData clamps at Y_CAP (40s) so the
-            // chart stays readable when one cycle blows past 60s.
             data: plotData,
             borderWidth: 2,
             tension: 0,
@@ -2525,11 +2082,6 @@ export default function Management2() {
             pointHoverRadius: ptHoverR,
             segment: {
               borderColor: seg => {
-                // 2026-05-28 — Per operator clarification: LINE segment
-                // colour is CT-vs-ideal based ("target line se upr red,
-                // niche green") — gradient at crossings.  DOTS still
-                // stay binary (OK green / NG red, via ptColors above).
-                // Tooltip box also stays binary (NG=red, OK=white).
                 const aCy = visSlice[seg.p0DataIndex];
                 const bCy = visSlice[seg.p1DataIndex];
                 const a = aCy?.ct_value;
@@ -2578,14 +2130,6 @@ export default function Management2() {
             fill: false,
             tension: 0,
           },
-          // Takt = customer demand rhythm.  Surfaced when rt.takt_seconds
-          // is provided AND differs from ideal by >0.1s.  Helps the
-          // supervisor see whether the machine is running TO TAKT (not
-          // just to its mechanical capability).
-          // 2026-05-18-r13 — Suppressed in portrait so the small CT
-          // cell doesn't carry an extra 33.63s horizontal line that
-          // operators mistake for cycle data.  Takt info is still
-          // shown in the Takt Time card to the right of the gauges.
           ...(!isPortrait && !hideTakt && rt?.takt_seconds && Math.abs(rt.takt_seconds - idealCT) > 0.1 ? [{
             type: "line",
             label: `Takt ${Number(rt.takt_seconds).toFixed(2)}s`,
@@ -2604,12 +2148,6 @@ export default function Management2() {
         maintainAspectRatio: false,
         animation: false,
         layout: { padding: { top: 30, bottom: 2 } },
-        // 2026-05-18-r12 — `intersect:false, mode:"index", axis:"x"`
-        // so a click ANYWHERE along an X-column opens that cycle's
-        // video.  Same fix WallboardLeft.jsx got — pixel-perfect dot
-        // hit was almost impossible on a 65" wallboard, and now-also
-        // on the smaller portrait-quad CT cell.  Operator complaint:
-        // "video kyu nhi aati h baar same issue h".
         interaction: { intersect: false, mode: "index", axis: "x" },
         onClick: (evt, _els, chart) => {
           // Two-path hit detection:
@@ -2639,30 +2177,14 @@ export default function Management2() {
           const recDate = rtRef.current?.record_date || new Date().toISOString().slice(0,10);
           const shiftNm = rtRef.current?.shift_name || "";
           const qs = `date=${recDate}&shift=${encodeURIComponent(shiftNm)}&cycle_seq=${cy.cycle_seq}`;
-          // 2026-05-27 — Always use cycle_seq time-window endpoint, not
-          // by-part MP4.  Same operator complaint as above: when many
-          // cycles share one part_code (scanner stuck), by-part returns
-          // the same file for every click.  Time-window slices unique
-          // clips per cycle from the rolling TS using each cycle's ts.
           const videoSrc =
             `/api/lines/${lineId}/cycle-video?${qs}`
             + `&t=${cy.cycle_seq || Date.now()}`
             + `&token=${encodeURIComponent(sessionStorage.getItem("mes_token")||"")}`;
-          // 2026-06-01 — Permanent archive fallback for older dots whose
-          // rolling-TS clip is gone (see openCycleVideo).  FI main line,
-          // machine_seq=0.  Used only when the live cut 404s.
           const archiveSrc =
             `/api/lines/${lineId}/archive-video?${qs}&machine_seq=0`
             + `&t=${cy.cycle_seq || Date.now()}`
             + `&token=${encodeURIComponent(sessionStorage.getItem("mes_token")||"")}`;
-          // 2026-08-22 — the chart's dot-click built its own URLs and opened the
-          // modal directly, so it skipped the wait-clock that openCycleVideo sets
-          // up.  The counter under "Loading cycle video" is driven by
-          // vidWaitStart, so from here it never started and every clip read 0.0s —
-          // and the Waiting Time page got no sample for the way operators most
-          // often open a clip.  Start both here.  Only refs / stable setState /
-          // the imported startTimer are touched, so the memoised chart callback
-          // cannot capture a stale copy of them.
           setVidWait(0);
           vidWaitStart.current = performance.now();
           vidTimerRef.current = startTimer("video",
@@ -2674,10 +2196,6 @@ export default function Management2() {
         plugins: {
           legend: { display: false },
           tooltip: {
-            // 2026-05-27 — Per-cycle tooltip styling.  Operator: NG
-            // cycles ka hover box bhi red ho, OK ka mat chedna.  We
-            // dynamically swap `backgroundColor` + `borderColor` based
-            // on whichever cycle the cursor is over.
             backgroundColor: ctx => {
               const idx = ctx.tooltip?.dataPoints?.[0]?.dataIndex;
               const cy  = idx != null ? visSlice[idx] : null;
@@ -2707,21 +2225,11 @@ export default function Management2() {
               title: items => `Cycle #${items[0].label}`,
               label: c => {
                 if (c.datasetIndex === 1) return ` Ideal: ${idealCT}s`;
-                // 2026-05-18-r7 — Tooltip always shows the REAL ct
-                // from visSlice, not the clamped `c.parsed.y` — so a
-                // 312s outlier reads as 312s here (with a clamp
-                // note) instead of silently appearing as 40s.
                 const cy   = visSlice[c.dataIndex];
                 const real = cy?.ct_value;
                 if (real == null) return " —";
                 const t  = cy?.ts ? new Date(cy.ts).toLocaleTimeString("en-IN",
                   { hour:"2-digit", minute:"2-digit", second:"2-digit" }) : "";
-                // 2026-05-27 — Pure binary tag now.  Operator: ">ideal
-                // wala bhi red dikha tha confusing".  OK = always "OK ✓"
-                // regardless of CT vs ideal; NG = always "⚠ NG".  Slow
-                // cycles still show actual CT in the tooltip (e.g.
-                // "CT: 15.59s") so the data is visible — just no false
-                // alarm via the status text.
                 const msg = cy?.is_ng ? "⚠ Alarm" : "✓ OK";
                 const tag = real > Y_CAP ? `  (>${Y_CAP}s clamped)` : "";
                 const out = [` CT: ${real}s${tag}  ${msg}`];
@@ -2736,11 +2244,6 @@ export default function Management2() {
         scales: {
           y: {
             beginAtZero: true,
-            // 2026-05-27 — Operator: "graph 0 se 40s kr de bs".
-            // Earlier the chart pinned at [idealCT-8, 40] which made
-            // the floor wander with model (7-15s).  Fixed at 0-40 now
-            // so post-NG OK rows that drop to ~5s remain visible and
-            // dot positions stay comparable across models.
             min: 0,
             max: Y_CAP,
             grid:   { color: D2 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)", drawBorder: false },
@@ -2753,22 +2256,12 @@ export default function Management2() {
             ticks:  { display: false },
           },
         },
-        // 2026-05-18-r12 — Cursor pointer canvas-wide.  With index-mode
-        // click detection, ANY click on a cycle column opens the
-        // video — operator shouldn't have to guess where exactly to
-        // tap, so the whole chart area shows the clickable cursor.
         onHover: (evt) => {
           if (evt?.native?.target) evt.native.target.style.cursor = "pointer";
         },
       },
       plugins: [hourlySlotPlugin, cycleLabelsPlugin],
     });
-    // 2026-05-18-r9 — `isPortrait` added so the chart instance is
-    // destroyed + rebuilt when the operator toggles orientation.
-    // The cmsChartRef canvas lives in DIFFERENT DOM positions for
-    // landscape (inside the toggle-chart card) vs portrait (inside
-    // the quad panel's top-left cell) — Chart.js gets confused if
-    // we don't rebuild on the swap.
   }, [dark, chartMode, filteredCms, chartReady, cmsViewStart, isPortrait]); // eslint-disable-line
 
   // ── Live rt update for fallback (when ct_log DB has no data yet) ─
@@ -2778,9 +2271,6 @@ export default function Management2() {
     const vals = [...ctData].reverse().filter(v => v !== null);
     if (!vals.length) return;
     const CT_TOL2 = 0.009;
-    // 2026-05-18-r7 — Clamp the fallback live values at the same 40s
-    // cap used for the main chart, otherwise an outlier coming
-    // through the rt path would still blow up the y-axis.
     const Y_CAP2 = /^\s*loop\s*pipe/i.test(line?.line_name || "") ? 30 : 40;
     cmsChartInst.current.data.datasets[0].data =
       vals.map(v => v == null ? null : Math.min(v, Y_CAP2));
@@ -2857,7 +2347,6 @@ export default function Management2() {
           setShowModalUI(false);
         } else {
           if (videoModal.video_url) {
-            /* blob cleanup no longer needed — video uses streaming URL */
           }
           _abortVid(); setVideoModal(null);
           setShowModalUI(false);
@@ -2875,9 +2364,6 @@ export default function Management2() {
     if (!videoModal && videoExpanded) setVideoExpanded(false);
   }, [videoModal]); // eslint-disable-line
 
-  // 2026-09-14 — This line has no live dashboard table (never provisioned).
-  // Render a clear message so the page OPENS instead of spinning forever on
-  // "CONNECTING…" (and reload-looping). The line name still shows if loaded.
   if (notProvisioned && !rt) return (
     <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:D?"#060912":"#f0f4f8",flexDirection:"column",gap:14,padding:24,textAlign:"center"}}>
@@ -2910,13 +2396,6 @@ export default function Management2() {
   // During a gap-shift phase, display the frozen previous-shift snapshot
   // so the screen doesn't blank out between shifts.
   const _rawRt        = (gapShift && frozenRtRef.current) ? frozenRtRef.current : rt;
-  // 2026-06-06 — OK-count stuck-guard ONLY.  Both UIs read the PLC register
-  // (D101/D102) — the SAME source — so they always match.  The 619 bug = the
-  // collector latched the previous shift's Final OK count at rollover; guard it:
-  // if ok_count >> this shift's real cycle count (cmsData, which resets every
-  // shift) use the real OK count for OK + Actual + the OK/actual hourly slots.
-  // NG (= D102 register) and the PLAN (shift_plan_completed / hour_*_plan) are
-  // NOT touched — so NG stays exact and the realtime plan is intact.  No restart.
   const _cyc          = Array.isArray(cmsData) ? cmsData : [];
   const _realOk       = _cyc.length ? Math.max(0, _cyc.length - ((_rawRt && _rawRt.ng_count) || 0)) : 0;
   const _okStuck      = !!(_rawRt && _cyc.length > 0 && (_rawRt.ok_count || 0) - _realOk > 200);
@@ -2931,32 +2410,12 @@ export default function Management2() {
     return o;   // ng_count / shift_plan_completed / hour_*_plan UNTOUCHED
   })();
   const okTotal       = displayRt.ok_count || 0;
-  // 2026-06-02 (FINAL-v5) — NG badge = PLC D102 register (rt.ng_count), EXACT.
-  // The collector now mirrors D102 byte-for-byte (no guard / hold / clamp — the
-  // 301 was a collector LATCH bug, the PLC's real D102 was 2).  ct_log/L109 NG
-  // sourcing REMOVED per operator.  Dashboard NG == D102, always.
   const ngTotal       = displayRt.ng_count || 0;
   const actual        = okTotal + ngTotal;
   const oee           = parseFloat(displayRt.overall_oee  || 0);
   const avail         = parseFloat(displayRt.availability || 0);
   const perf          = parseFloat(displayRt.performance  || 0);
   const qual          = parseFloat(displayRt.quality_oee  || 0);
-  // 2026-05-18-r12 — Outlier-filtered shift average CT.
-  // Operator spec: "33.43 ct aa rha h breakdown chal rha h to bhi" —
-  // when a breakdown happens MID-CYCLE the L108 edge for that cycle
-  // fires after the resume, so its ct_value reads (real-active-time
-  // + breakdown-pause-time).  A single such cycle of 200s polluted
-  // the shift average even though all other cycles were ~15s.
-  //
-  // Two-layer guard, mirroring the chart's Y_CAP=40s clamp:
-  //   1. AbsoluteCap : drop any cycle > 40s (== the chart-clamp limit).
-  //                    Anything beyond is almost certainly machine-
-  //                    pause padding, not real cycle time.
-  //   2. MedianFilter: of what remains, drop cycles > 2.5× the median.
-  //                    Catches the "ladder bug → 60s every now and
-  //                    then" pattern where 40s cap isn't enough.
-  // Both filters report `excluded` count back for the operator info
-  // chip rendered in the Cycle Time card body.
   const ctStats = (() => {
     if (cmsData.length === 0) {
       const actual = (displayRt.ok_count || 0) + (displayRt.ng_count || 0);
@@ -3045,24 +2504,6 @@ export default function Management2() {
       return aRel - bRel;
     });
 
-  // ── OT slot gating ───────────────────────────────────────────
-  // 2026-06-01 — A persisted "OT" slot (db_column_prefix ending `_ot`, e.g.
-  // hour_1715_1815_ot, slot_order 999) lives permanently in mes_hourly_slots
-  // and is NOT managed by the OT on/off toggle (set_ot_active only flips
-  // mes_lines.ot_active_shift — it never inserts/deletes this slot).  Because
-  // every configured slot renders unconditionally, this made the OT row in the
-  // hourly table AND the OT colour-fill in the shift timeline appear even when
-  // OT is OFF.  Operator spec: OT must surface ONLY when the OT switch is on.
-  //
-  // Fix (frontend-only, no DB/collector change): drop the persisted OT slot
-  // from BOTH render pipelines — the table-data build (_rawSlots) and the
-  // timeline bar.  When OT is actually on (otActive), the OT window is already
-  // shown by the gated synthetic OT row (hourly table) and the gated dedicated
-  // OT timeline segment, so nothing is lost when OT is enabled — and the old
-  // double-row (configured slot + synthetic) when OT was on is removed too.
-  // allSlots itself is left intact so unrelated consumers (CT-chart slot
-  // filter, PY-bypass episode modal, CT divider labels) are byte-for-byte
-  // untouched — zero regression.
   const isOtSlot = (s) => /_ot$/i.test(s?.db_column_prefix || "");
 
   // ── Slot data — 100% collector-sourced ───────────────────────
@@ -3095,38 +2536,7 @@ export default function Management2() {
     .filter(s => !s.isFuture && !s.isCurrent)
     .reduce((acc, s) => acc + s.planDB, 0);
 
-  // ── Gap-fill slot actuals from ct_log timestamps ─────────────────
-  // 2026-06-01 — operator: "ye gap mt rkha kr ... ek hour me bhar de ya
-  // 2 hour me bhar de".  The collector's per-slot _ok/_ng/_actual columns
-  // can fall behind the register total when a snap-on-reconnect backfills
-  // the register (and writes ct_log rows) WITHOUT bumping any one slot
-  // bucket — leaving  Σ(slot actual) < total actual  (the visible "gap").
-  //
-  // cmsData already holds every cycle's timestamp (the very same ct_log we
-  // render in the CT chart), so we bucket those cycles into the SAME slot
-  // windows and lift each slot up to its true count.  This lands the
-  // missing parts in the EXACT hour they occurred (1-h gap → that hour,
-  // 2-h gap → spread across both), which is what the operator asked for.
-  //
-  // Zero-regression guards:
-  //   • pure Math.max — never LOWERS a collector value, so a slot the
-  //     collector already counted correctly is left untouched.
-  //   • no-op when cmsData hasn't loaded yet → falls back to the collector
-  //     values (== today's behaviour); it can only ever improve the table.
-  //   • skipped during a between-shift gap (displayRt is then a frozen
-  //     previous-shift snapshot and cmsData may belong to the next shift).
-  //   • a cycle buckets only if its time-of-day lands inside a slot window,
-  //     so any foreign-shift row simply fails to match and is ignored.
-  // The synthetic OT row below sums these filled values, so its leftover
-  // shrinks automatically and never double-counts.
-  // 2026-06-02 — ct_log readiness gate, shared by the NG-truth sourcing
-  // below.  Require >0 rows so an empty / not-yet-loaded cmsData falls back
-  // to the collector columns (never blanks NG mid-load or on fetch failure).
   const _ctReady = !gapShift && Array.isArray(cmsData) && cmsData.length > 0;
-  // 2026-06-08 — NG per slot now bucketed from /ng-list events (ngEvents),
-  // NOT cmsData.  /ct-history omits scan-fail ERROR cycles so its is_ng
-  // under-counts; the real ct_log NG (== D102) comes from /ng-list.  OK is
-  // still sourced from cmsData (unchanged).  Shared ts->slot mapper below.
   const _ngReady = !gapShift && ngLoaded;
   const _tsFill = {};   // slot index -> { ok, ng }  (per slot)
   const _slotOf = (tsRaw) => {
@@ -3164,22 +2574,6 @@ export default function Management2() {
       ? Math.max(0, (displayRt.shift_plan_completed || 0) - pastPlanSum)
       : s.planDB;
     const tb   = _tsFill[i] || { ok:0, ng:0 };
-    // 2026-08-01 — LOCK completed slots.  A PAST (ended) slot shows exactly
-    // its DB-recorded hour_*_{ok,ng,actual} columns — FROZEN, no cmsData /
-    // ngEvents re-bucketing.  The old code did Math.max(s.okDB, tb.ok) (and
-    // tb.ng for NG), where tb comes from bucketing cmsData/ngEvents by
-    // wall-clock ts on EVERY render; those fetches are unstable (the
-    // /ct-history reset_id anchor truncates history when a new cycle_seq=1
-    // row lands, and duplicate ct_log rows over-count), so a finished slot's
-    // value drifted up/down even though the DB never moved.  Operator spec:
-    // "jis hour me jitne part recorded, wahi lock — slot end hote hi na ek
-    // badhe na ek kam ho."  Only the CURRENT in-progress slot keeps the live
-    // gap-fill (it is legitimately changing); and its cells are anyway
-    // reconciled to the live PLC register in the FINAL block below.
-    // 2026-06-02 note (retained, applies to the current slot's NG only):
-    // NG for the live slot is sourced from ct_log EVENTS (tb.ng) because the
-    // hour_*_ng register column could carry desync junk; past slots now read
-    // the recorded column directly per the lock rule above.
     const okF  = s.isFuture ? 0 : (s.isCurrent ? Math.max(s.okDB, tb.ok) : s.okDB);
     const ngF  = s.isFuture ? 0 : (s.isCurrent ? (_ngReady ? tb.ng : Math.max(s.ngDB, tb.ng)) : s.ngDB);
     const actF = s.isFuture ? 0 : (s.isCurrent ? ((_ctReady && _ngReady) ? (okF + ngF) : Math.max(s.actualDB, okF + ngF)) : s.actualDB);
@@ -3188,22 +2582,6 @@ export default function Management2() {
              isFuture:s.isFuture, isCurrent:s.isCurrent, p:s.p };
   });
 
-  // ── Synthetic OT slot ────────────────────────────────────────
-  // 2026-05-13 — operator spec:
-  //   "OT on krte hi dashboard prr ek slot add bhi hona chaiye uska
-  //    plan zero hona chaiye actual kaa data collector se aana chaiye"
-  //
-  // When OT is active for THIS shift AND ot_end_time is configured,
-  // append an OT-window row to the hourly table.  Logic:
-  //   plan   = 0  (no shift target carries into OT)
-  //   ok/ng  = total - sum(regular slots)  (cycles produced after the
-  //           last regular slot's end fall outside every slot window
-  //           but are still counted in rt.ok_count / rt.ng_count)
-  //   actual = ok + ng
-  //   variance = actual (since plan is 0)
-  // Time geometry follows the same minute-of-day relative-frame used
-  // by every other slot.  isCurrent / isFuture wired so the "▶ NOW"
-  // indicator moves into the OT slot once we cross shift_end.
   const slotData = (() => {
     const out = [..._baseSlotData];
     if (!otActive || !shiftCfg?.ot_end_time) return out;
@@ -3227,7 +2605,6 @@ export default function Management2() {
     const regularNg     = out.reduce((acc, s) => acc + (s.ngDB || 0), 0);
     const regularActual = out.reduce((acc, s) => acc + (s.actualDB || 0), 0);
     const totalOk       = displayRt.ok_count || 0;
-    // 2026-06-02 (FINAL-v5) — OT leftover NG from PLC D102 register (rt.ng_count).
     const totalNg       = displayRt.ng_count || 0;
     const totalActual   = totalOk + totalNg;
     const otOk     = Math.max(0, totalOk - regularOk);
@@ -3239,10 +2616,6 @@ export default function Management2() {
       return `${String(Math.floor(mod/60)).padStart(2,'0')}:${String(mod%60).padStart(2,'0')}`;
     };
 
-    // 2026-06-19 — manual OT target (mes_shift_configs.ot_plan, surfaced on the
-    // realtime payload as rt.ot_plan).  The collector never auto-plans the OT
-    // slot, so the production admin sets this by hand; use it as the OT row's
-    // plan so OT shows real plan / variance / efficiency like a normal slot.
     const otPlan = Math.max(0, Math.round(Number(displayRt.ot_plan ?? rt.ot_plan) || 0));
     out.push({
       label:    `OT ${fmtHM(sEndMin)}-${fmtHM(otEndMin)}`,
@@ -3260,59 +2633,6 @@ export default function Management2() {
     return out;
   })();
 
-  // ── 2026-06-01 — DISPLAY total = Σ(slotData) ──────────────────
-  // Operator spec: "vo part jo gap me chale to vo if OT enable ho to
-  //  count ho, nhi to mujhe needn nhi un part ko count krne ki."
-  // The collector mirrors the PLC register straight into ok_count /
-  // ng_count, so parts produced in the between-shift GAP, scheduled
-  // breaks, or after the last regular slot inflate the raw total even
-  // though they land in NO hourly slot.  For the DISPLAY ONLY (collector
-  // / DB / counts are UNTOUCHED) the headline Actual + OK/NG totals are
-  // re-derived as the sum of the hourly table itself:
-  //   • OT off → no synthetic OT row  → Σ = regular slots = gap EXCLUDED
-  //   • OT on  → synthetic OT row adds (ok_count − Σregular) → Σ = ok_count
-  // So OT-window parts ARE counted (via the OT row) while gap / break /
-  // un-slotted parts are NOT — exactly the operator rule.  This also
-  // makes the ACTUAL row cells add up to the TOTAL column (previously
-  // the TOTAL showed the raw register count and didn't reconcile).
-  // ── 2026-06-02 — Un-slotted NG reconcile (frontend DISPLAY only) ──
-  // A register-counted NG can land in rt.ng_count WITHOUT ever writing a
-  // per-slot hour_*_ng column OR a ct_log cycle row (no timestamp exists to
-  // bucket it).  The header + hourly table are built 100% from per-slot data,
-  // so they show NG 0 while the dropdown (ng_count) shows the real NG — the
-  // NG "vanishes" everywhere except the raw total.  Operator 2026-06-02: a
-  // real NG MUST surface in the header AND the hourly table, in the current
-  // hour.  Mirror the synthetic-OT-row pattern (otNg = totalNg − regularNg):
-  // top up the CURRENT hour slot's NG so Σ(slot ng) reconciles to ng_count.
-  //
-  // Zero-regression guards:
-  //   • NG-ONLY — okDB / plan are never touched, so OK's deliberate
-  //     gap-exclusion (the Σ-only rule above) stays byte-for-byte intact.
-  //   • No double-count: when OT is on the OT row already absorbed the
-  //     leftover, so Σ(slot ng) already == ng_count → leftover is 0 → no-op.
-  //     The whole OT pipeline is therefore left untouched.
-  //   • Pure top-up via Math.max(0, …) — can only ADD a missing NG, never
-  //     lower a slot the collector already attributed correctly.
-  //   • Targets the in-progress slot; falls back to the last already-started
-  //     slot when none is current (e.g. shift ended / between-shift gap).
-  // ── 2026-06-03 (FINAL-v6) — OK *and* NG total = PLC registers, distributed ─
-  // Operator: "sab match karva, live PLC value utha ke."  BOTH counts must equal
-  // the live PLC registers EXACTLY — OK = rt.ok_count (D101), NG = rt.ng_count
-  // (D102) — mirrored byte-for-byte by the collector.  Earlier OK used the slot
-  // Σ (gap-excluded -> showed 104 while D101=124); now OK is ALSO laid across the
-  // hourly slots by ct_log shape so header / cells / total / footer / Actual ALL
-  // equal the live PLC count.  Hourly split is by shape only; the TOTAL is exact.
-  // 2026-08-01 — LOCK past slots; reconcile the live register total into the
-  // CURRENT slot ONLY.  The old FINAL-v6 code proportionally RE-DISTRIBUTED the
-  // whole live ok_count / ng_count across EVERY non-future slot on every
-  // render.  Because the total grows each cycle and the largest-remainder
-  // rounding reshuffles the ±1 leftover, completed slots jittered up/down (the
-  // reported "upar-neeche kam-zyada") even though their DB value never changed.
-  // New rule: each PAST slot keeps its recorded value frozen, and only the
-  // in-progress slot absorbs the leftover (register total − Σ past), so the
-  // header / footer / total still equal the live PLC register EXACTLY while
-  // finished hours stay locked.  When no slot is current (shift ended / gap),
-  // nothing is reconciled — every slot stays on its recorded DB value.
   (() => {
     const _nonFut = slotData.map((s, i) => (!s.isFuture ? i : -1)).filter(i => i >= 0);
     if (!_nonFut.length) return;
@@ -3333,14 +2653,6 @@ export default function Management2() {
     });
   })();
 
-  // 2026-07-01 — OK/Actual headline + timeline + table TOTALs now read the PLC
-  // register DIRECTLY (D101=ok_count, D102=ng_count), exactly like the NG badge
-  // already does (see the _okStuck note above).  The old slot-sum flowed through
-  // the _okStuck guard, which MISFIRES for a line provisioned/started MID-SHIFT:
-  // its ct_log has only post-start rows, so a legitimately-high register got
-  // wrongly downgraded (YCA-SS D101=1149 was shown as 16).  For a normal
-  // full-shift line this is a NO-OP (Σ slotData.okDB already == ok_count).  The
-  // per-slot cells still show observed hours; the headline/total are register-truth.
   const okShown     = (_rawRt && _rawRt.ok_count) || 0;   // D101 register (truth)
   const ngShown     = (_rawRt && _rawRt.ng_count) || 0;   // D102 register (truth)
   const actualShown = okShown + ngShown;
@@ -3351,10 +2663,6 @@ export default function Management2() {
   const tVar    = tActual - tPlan;
   const progress = tPlan ? Math.min(100, (tActual/tPlan)*100) : 0;
 
-  // 2026-09-14 — Manual HH:MM:SS format instead of toLocaleTimeString("en-IN").
-  // On the panel's WebView that locale wrapped the time in invisible directional
-  // marks (LRM/U+200E) that rendered as stray white dashes on either side of the
-  // clock. A plain padStart string has no locale characters at all.
   const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
 
   const chartTitle = (() => {
@@ -3365,25 +2673,6 @@ export default function Management2() {
 
   const card = (e={}) => ({ background:bgCard, borderRadius:10, border:`1px solid ${border}`, overflow:"hidden", ...e });
 
-  // 2026-05-18-r8 — Floating-modal positioning helper.
-  // Modals (Loss / PY / Sensor) follow the dashboard's ROTATION
-  // state, not its isPortrait state.  If the dashboard itself isn't
-  // CSS-rotated (i.e. layout matches viewport), the modal opens with
-  // plain `inset:0` so it covers the natural viewport.  If the
-  // dashboard is rotated (mismatch case), the modal rotates 90°
-  // around top-left to land in the same rotated frame.  This keeps
-  // the modal text upright relative to the operator's eyeline
-  // regardless of which combination of viewport + manual override is
-  // in play.
-  // 2026-05-19 — REVERTED on operator request.  Previous rev tried to
-  // match the dashboard orientation (portrait popup when portrait
-  // dashboard).  Reverted back to ALWAYS-landscape: the popup always
-  // covers the natural viewport with plain `inset:0`, regardless of
-  // dashboard rotation state.  Combined with the React-Portal escape
-  // hatch (renders at document.body, outside the rotated dashboard's
-  // transform-ancestor), this guarantees popups are upright relative
-  // to the physical monitor — never inheriting the dashboard's CSS
-  // rotation.  Operator quote: "VIDEO STILL ULTI HI RENDER HO RHI HAI".
   const overlayPosStyle = {
     position: "fixed",
     inset: 0,
@@ -3412,8 +2701,6 @@ export default function Management2() {
 
     if (allEntries.length === 0) return null;
 
-    // Carry-over: the LAST entry whose relFrac ≤ ssRel.
-    // This is the status that was active when this slot began.
     let carryOver = null;
     for (let i = allEntries.length - 1; i >= 0; i--) {
       if (allEntries[i].relFrac <= ssRel) { carryOver = allEntries[i]; break; }
@@ -3457,11 +2744,6 @@ export default function Management2() {
       const widthPct = ((endRel  - startRel) / sdur) * 100;
       if (widthPct <= 0) continue;
 
-      // Convert relative minutes back to clock time for hover tooltip.
-      // Earlier this stripped seconds, so a segment that ran 08:30:43→
-      // 08:35:00 (4m 17s) showed as "08:30 – 08:35" — looking like 5 min
-      // and contradicting the 4m 17s duration shown alongside.  Now we
-      // include seconds so the math the user reads matches what they see.
       const toClk = (relMin) => {
         // Total seconds since midnight, wrapped to 24 h.
         const absSec = Math.round(((sStart + relMin) * 60)) % 86400;
@@ -3541,72 +2823,17 @@ export default function Management2() {
       )}
 
       <div style={{
-        // Layout stays IDENTICAL in portrait — we just CSS-rotate the
-        // whole tree 90° clockwise (see the .fs-rotated wrapper above
-        // these grid styles).  This way nothing reflows / overlaps —
-        // a vertically-mounted screen sees the same dashboard, just
-        // physically rotated.
-        // 2026-05-18-r8 — dimensions follow `needsRotation`, not
-        // `isPortrait`.  When the layout already matches the viewport
-        // (e.g. portrait grid on a portrait browser), we want the grid
-        // to fill the viewport NATIVELY — height=100vh, width=100vw —
-        // not be rotated.  Rotation case still swaps the two values so
-        // the 90°-rotated grid lands inside the viewport box.
         height:  needsRotation ? "100vw" : "100vh",
         width:   needsRotation ? "100vh" : "100%",
         display:"grid",
-        // 2026-05-18 — operator-drawn 9:16 spec:
-        //   row 1 (title)  : full width
-        //   row 2 (KPI area): col1 = KPI gauges + Prod/CT/Takt left-aligned,
-        //                      col2 = Loss Distribution center,
-        //                      col3 = PY + Sensor side
-        //   row 3 (CT graph + Daily/Weekly/Monthly toggle): full width
-        //   row 4 (CT Histogram Distribution)              : full width
-        //   row 5 (Timeline)                               : full width
-        //   row 6 (Hourly slot table)                      : full width
         gridTemplateColumns: isPortrait ? "1fr 200px 185px" : "1fr 285px",
         gridTemplateRows:    isPortrait
-          // 2026-05-18-r4 — KPI band tightened from 240px to 95px + 110px
-          // split via gridAutoRows below.  Operator complaint: "kpi KI
-          // PADDING BOHOT ZADA HAI ... MAIN COMPONENT KO HAMPER KRR RHI
-          // HAI".  Gauges sub-row a = 90px (was floating ~95px); cards
-          // sub-row b = 110px tight (Production / CT / Takt fill 100%
-          // of cell height now via flex column space-around so they no
-          // longer look "khali").  Total KPI band ~205px — buys 35 px
-          // back for the chart + histogram rows below.
-          // 2026-05-18-r9 — Portrait grid simplified from 6 rows to 5:
-          //   row 1: header (auto-grow when flex-wrapped)
-          //   row 2: KPI band (205px)
-          //   row 3: 2×2 QUAD chart panel (1fr — fills remaining)
-          //   row 4: timeline (auto)
-          //   row 5: hourly  (auto)
-          // The old separate histogram row (was row 4) folds INTO the
-          // quad panel's bottom-right cell.  Matches operator's
-          // sample.docx layout: "page box hi shi h baki kr de or
-          // niche timeline and hourly same rhegi".
-          // 2026-08-10 — 5 rows → 6.  The quad panel was split so the CT graph
-          // gets its own row (beside the PY / Sensor / PM column) and the
-          // Daily / CT-Distribution / Weekly band gets a full-width row below.
-          //   row 1 header · row 2 KPI band · row 3 CT graph
-          //   row 4 lower chart band · row 5 timeline · row 6 hourly
-          // Demo page 2: row 3 = CT graph | CT Distribution (60/40),
-          // row 4 hourly, row 5 timeline, row 6 Documents (Track Record upright
-          // + 2×2 landscape sheets; its height follows the width, the CT row
-          // takes the rest).
           ? `minmax(50px, auto) 205px 1fr auto auto auto`
           : "minmax(50px, auto) 1fr auto auto",
         gap:6, padding:6,
         paddingTop: gapShift ? 40 : 6,
         background:bg, color:text,
         overflow:"hidden",
-        // 2026-05-18-r8 — Clockwise rotation only fires when the
-        // selected layout direction differs from the viewport's
-        // natural orientation (e.g. portrait layout requested on a
-        // landscape viewport for vertical-mounted 16:9 screens).  In
-        // all other cases the grid renders inline without rotation,
-        // so a desktop dev viewing a landscape browser sees the
-        // landscape dashboard upright, and a tablet user on a
-        // portrait browser sees the portrait dashboard upright.
         position:    needsRotation ? "fixed" : "static",
         top:         needsRotation ? 0       : undefined,
         left:        needsRotation ? "100vw" : undefined,
@@ -3760,9 +2987,6 @@ export default function Management2() {
                 on /fullscreen/<line_id>; Sub navigates to
                 /submachine/<sub_id> for that machine's detail view. */}
             {(() => {
-              // 2026-07-13 — In the YWD/2UA zone this pill switches LINES
-              // (zoneLines populated); everywhere else it keeps switching
-              // this line's sub-machines exactly as before.
               const zoneMode    = zoneLines.length > 0;
               const mainMachine = machines.find(m => !m.parent_plc_id);
               const machineName = mainMachine?.machine_name
@@ -4062,11 +3286,6 @@ export default function Management2() {
                 // gives the Plan/Actual/OK/NG values enough room to
                 // render at large font without overflowing.
                 gridTemplateColumns:   "repeat(12, 1fr)",
-                // 2026-05-18-r4 — Explicit row heights (was auto).  Row a
-                // 90px = gauges, row b 1fr = Production/CT/Takt cards
-                // fill the rest of the 205px KPI band.  Each card uses
-                // flex column + height:100% so its rows distribute
-                // evenly inside the box.
                 gridTemplateRows:      "90px 1fr",
                 gridColumn:            1,
                 gridRow:               2,
@@ -4118,10 +3337,6 @@ export default function Management2() {
           <div style={{...card(),
                 width: isPortrait ? "auto" : 170,
                 flexShrink: 0,
-                // 2026-05-18-r4 — Fill the 1fr row b cell with flex
-                // column.  Content inside (Plan / Actual / OK-NG /
-                // optional kWh) distributes via space-around so the
-                // card never looks "khali" anymore.
                 ...(isPortrait ? {
                   gridColumn: "1 / 5", gridRow: 2,
                   display:"flex", flexDirection:"column", minHeight:0,
@@ -4365,17 +3580,6 @@ export default function Management2() {
               Monthly + Histogram pair.                              */}
           {isPortrait && (
             <div style={{
-              // 2026-08-07 — was "1 / -1" (full width), which ran the chart
-              // panel UNDER the PY / Sensor / PM column and squeezed those
-              // tiles into the 205px KPI band alone.  Stopping at column 3
-              // lets that column own the full height instead, so the three
-              // check tiles are as tall as the chart area and the chart keeps
-              // the same right edge as the KPI band above it.
-              // 2026-08-10 — this wrapper now holds ONLY the CT graph, so the
-              // PY / Sensor / PM column beside it ends exactly where the CT
-              // graph ends.  Daily / CT-Distribution / Weekly moved to their
-              // own full-width wrapper on the next row (see below), because the
-              // operator wants those three to run the full width of the screen.
               gridColumn: "1 / -1", gridRow: 3,
               display: "grid",
               gridTemplateColumns: "3fr 2fr",   // demo page 2: CT graph 60 | CT Distribution 40
@@ -4578,12 +3782,6 @@ export default function Management2() {
                         <div style={{display:"flex", justifyContent:"space-between",
                                      fontSize:9, color:textSub, marginTop:1}}>
                           {(() => {
-                            // 2026-06-10 — Boundary + window labels all read the
-                            // VISIBLE window's edge cycle_seq, so the left/right #
-                            // numbers bracket exactly what's on the chart and line
-                            // up with the "viewing" range + the total count.
-                            // (Earlier the ends showed the whole dataset's first/
-                            // last seq, which didn't match the 30-cycle window.)
                             const s = cmsViewStart ?? Math.max(0, filteredCms.length - 30);
                             const e = Math.min(s + 30, filteredCms.length);
                             const startSeq = filteredCms[s]?.cycle_seq;
@@ -4889,8 +4087,6 @@ export default function Management2() {
                       />
                       <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:textSub,marginTop:1}}>
                         {(() => {
-                          // 2026-06-10 — see landscape note: ends + window range all
-                          // use the visible window's edge cycle_seq so they match.
                           const s = cmsViewStart ?? Math.max(0, filteredCms.length - 30);
                           const e = Math.min(s + 30, filteredCms.length);
                           const startSeq = filteredCms[s]?.cycle_seq;
@@ -4973,9 +4169,6 @@ export default function Management2() {
             tap → modal. */}
         <div style={{
           display:"flex",flexDirection:"column",gap:6,minHeight:0,overflow:"hidden",
-          // 2026-08-07 — span rows 2→3 (was row 2 only) so PY / Sensor Health
-          // / PM Check run the full height beside the KPI band AND the chart
-          // panel, instead of being crushed into the 205px band.
           ...(isPortrait ? { gridColumn: 3, gridRow: 2 } : {}),   // demo page 2: beside the KPI band only
         }}>
 
@@ -5013,11 +4206,6 @@ export default function Management2() {
                                           : `${pyFailedCount} check${pyFailedCount!==1?'s':''} failed — tap for detail`}
                   style={{
                     flex:1, width:"100%", border:"none", cursor: pyEmpty ? "default" : "pointer",
-                    // 2026-05-18-r4 — Smaller padding + smaller fonts in
-                    // portrait so the 185px-wide column doesn't truncate.
-                    // Operator: "PY BOX aur sensOR BOX KE ANDAR JO LIKH RHA
-                    // USKA SIZE MINMIZE KRR DE BUT CONTANT SAARA UTNE S
-                    // BOXES MEIN FIT OFF HONA CHAIYE".
                     padding: isPortrait ? "6px 8px" : "12px 14px",
                     background: pyEmpty ? bgIdle : pyAllOk ? bgGood : bgBad,
                     display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
@@ -5114,8 +4302,6 @@ export default function Management2() {
                        :          "No PYs configured for current model — tap for detail"}
                   style={{
                     flex:1, width:"100%", border:"none", cursor:"pointer",
-                    // 2026-05-18-r4 — Symmetric tighten with PY card above so
-                    // the 185-px col fits all content without truncation.
                     padding: isPortrait ? "6px 8px" : "12px 14px",
                     background: bg,
                     display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
@@ -5330,9 +4516,6 @@ export default function Management2() {
               const wPct  = (otDur / sDur) * 100;
               const isFuture = sElapsed < ssRel;
 
-              // Future OT window — striped to visually distinguish from
-              // regular future slots (admin activated OT but operator
-              // hasn't reached that time yet).
               if (isFuture) {
                 return (
                   <div key="ot-future" style={{
@@ -5526,7 +4709,6 @@ export default function Management2() {
           </div>
         </div>
 
-
       </div>
 
       {/* ── Timeline hover tooltip ── */}
@@ -5570,7 +4752,6 @@ export default function Management2() {
               setShowModalUI(false);
             } else {
               if (videoModal?.video_url) {
-                /* blob cleanup no longer needed — video uses streaming URL */
               }
               _abortVid(); setVideoModal(null);
               setShowModalUI(false);
@@ -5588,11 +4769,6 @@ export default function Management2() {
             onClick={e => e.stopPropagation()}
             style={videoExpanded
               ? {
-                  // 2026-05-23 — YouTube-style true fullscreen.
-                  // Black background, zero padding, no border — video
-                  // owns 100vw × 100vh and the header chrome is hidden
-                  // (see header div below: `display:none` when expanded).
-                  // Floating expand/× buttons overlay the top-right corner.
                   background: "#000",
                   borderRadius:0, padding:0,
                   width:"100vw", height:"100vh", maxWidth:"none",
@@ -5601,10 +4777,6 @@ export default function Management2() {
                   position:"relative",
                 }
               : {
-                  // 2026-05-27 — NG cycle: red frame so the operator
-                  // can tell at a glance whether the modal they just
-                  // opened is an NG part.  OK cycle uses the default
-                  // border colour (unchanged).
                   background: videoModal?.is_ng
                     ? (D ? "#1a0a0d" : "#fef2f2")
                     : (D ? "#0a0f1a" : "#ffffff"),
@@ -5689,7 +4861,6 @@ export default function Management2() {
                       setShowModalUI(false);
                     } else {
                       if (videoModal?.video_url) {
-                        /* blob cleanup no longer needed — video uses streaming URL */
                       }
                       _abortVid(); setVideoModal(null);
                       setShowModalUI(false);
@@ -5803,26 +4974,11 @@ export default function Management2() {
                 }}
                 onSeeked={()    => setVideoBuffering(false)}
                 onLoadedMetadata={e => {
-                  // Stash the video's actual duration so the header can
-                  // surface a CT/DB mismatch (see "Part #N | ... s" block
-                  // above).  Older collector bug: when an OK pulse was
-                  // missed, the next caught pulse stored ct = real * 2/3/4.
-                  // The video is extracted on a separate edge so its
-                  // duration is the truth.  Showing both teaches the
-                  // operator to trust the video.
                   const d = e.target?.duration;
                   if (d && isFinite(d) && d > 0) {
                     setVideoModal(m => m ? { ...m, _video_duration: d } : m);
                   }
-                  // 2026-05-28 — Mark metadata loaded so the offset
-                  // useEffect can apply seek once both the offset and
-                  // the video's duration are known (whichever arrives
-                  // last triggers the seek).
                   setVideoModal(m => m ? { ...m, _meta_loaded: true } : m);
-                  // 2026-05-27 — Playback rate stays 1.0 (real-time).
-                  // The earlier "slow" feeling was actually the
-                  // server-side render latency, which is now fixed by
-                  // switching NVENC to p1 preset on the backend.
                 }}
                 onLoadedData={e => {
                   // Demo: the clips carry no audio. Try unmuted (as MES does); if the browser
@@ -5833,17 +4989,6 @@ export default function Management2() {
                 onClick={e => { e.target.paused ? e.target.play() : e.target.pause(); }}
                 controlsList="nofullscreen nodownload"
                 onError={e => {
-                  // 2026-05-28 — Tightened retry policy.  Operator's
-                  // panasonic camera is dying every 10-30 s; with the
-                  // old "5 retries × 3 s" loop the same dead cycle
-                  // hammered the server 5× in 15 s, flooding the CMS
-                  // log with 503/404 spam.  Now: probe the URL via fetch
-                  // FIRST so we get the actual HTTP status, branch on it:
-                  //   • 503 = camera offline → show that, NO retry
-                  //   • 404 = MP4 not yet extracted → 1 retry after 5 s
-                  //   • network err / decode = 1 retry after 5 s
-                  // Total max 2 hits to server per cycle click, much
-                  // gentler on the recorder while it's recovering.
                   if (e.target?.dataset?.closing === "1") return;   // demo: popup closed on purpose
                   const me   = e.target?.error;
                   const code = me?.code;
@@ -5859,11 +5004,6 @@ export default function Management2() {
                     fetch(src, { method: "GET", headers: { Range: "bytes=0-0" }, signal: _errCtrl.signal })
                       .then(r => {
                         clearTimeout(_errTmo);
-                        // 2026-06-01 LEAK FIX — release the socket immediately;
-                        // we only need r.status, never the body.  The Panasonic
-                        // cam drops every 10-30s so this onError probe fires a
-                        // lot; un-cancelled bodies were exhausting the 6-per-
-                        // origin pool and freezing the live /realtime poll.
                         try { if (r.body) r.body.cancel(); } catch { /* noop */ }
                         if (r.status === 503) {
                           setVideoModal(m => m ? {
@@ -5873,13 +5013,6 @@ export default function Management2() {
                             _lastUrl: m.video_url,
                           } : m);
                         } else if (r.status === 404) {
-                          // 2026-06-01 — Older dot: the live rolling-TS clip is
-                          // gone (TS wiped at the shift boundary), so the live
-                          // /cycle-video cut 404s.  Before retrying the dead
-                          // live cut, try the PERMANENT archive clip once
-                          // (D:\VideoArchive via mes_video_archive).  Recent
-                          // dots still play from the live cut and never reach
-                          // here, so this is purely additive — no regression.
                           const arch = videoModal?._archive_url;
                           if (arch && !videoModal?._triedArchive) {
                             setVideoModal(m => m ? { ...m, _triedArchive: true,
@@ -5928,11 +5061,8 @@ export default function Management2() {
                 onEnterPictureInPicture={() => setPipActive(true)}
                 onLeavePictureInPicture={() => {
                   setPipActive(false);
-                  // If the user had closed the modal and was relying on PiP
-                  // to keep watching, dispose of everything when PiP ends.
                   setVideoModal(m => {
                     if (!showModalUI) {
-                      /* blob cleanup no longer needed — video uses streaming URL */
                       return null;
                     }
                     return m;
@@ -6085,13 +5215,6 @@ export default function Management2() {
                 <FsCycleCommentsPanel
                   lineId={lineId}
                   machineName="Final Inspection"
-                  /* 2026-06-05 — Key = cycle_seq + the cycle's DATE.  cycle_seq
-                     resets every day, so `cycle_<seq>` alone made today's cycle
-                     #N show a PAST day's cycle #N notes.  Adding the ts-date
-                     (`cycle_<seq>_<YYYY-MM-DD>`) keeps it per-day AND still syncs
-                     with the Wallboard (both compute the same key from the same
-                     ts).  /wallboard-cycles has no part_code, so this is the
-                     shared id.  (Backend untouched, no deletes.) */
                   partCode={`cycle_${videoModal.cycle_seq}` + (videoModal.ts ? `_${new Date(videoModal.ts).toISOString().slice(0, 10)}` : "")}
                   isFallbackKey={true}
                   isNg={!!videoModal.is_ng}
@@ -6099,10 +5222,6 @@ export default function Management2() {
                   text={text}
                   textSub={textSub}
                   textMut={textMut}
-                  /* 2026-09-16 — prefer the CYCLE's own shift: cycle_seq also
-                     restarts every shift, so A-shift #10 and B-shift #10 of the
-                     same day collided on one thread.  Fall back to the live
-                     shift only when the cycle row doesn't carry one. */
                   shift={videoModal.shift_name || displayRt?.shift_name || rt?.shift_name}
                 />
               )}
@@ -6530,22 +5649,6 @@ export default function Management2() {
         const serverBySlot = pyEvents?.by_slot || {};
         const slotSummary  = pyEvents?.slot_summary || {};
 
-        // Group events by hourly slot + classify slot relative to NOW
-        // so future slots don't masquerade as "✓ All set" (operator
-        // feedback 2026-05-16: a 14:05-15:05 row showing All set at
-        // 08:35 makes no sense — slot hasn't even started).
-        //
-        // 2026-05-16 (afternoon) — Operator hit a contradiction: the
-        // POKA card on the dashboard showed "⚠ 3 FAILED" but every
-        // slot in this modal said "✓ All set".  Root cause: the card
-        // reads `pokaStatus` (live `/poka-yoke/live/{lineId}` state
-        // — bypassed events in last 8 h) while the modal reads from
-        // `pyEvents.events` (historical events log filtered by today's
-        // shift window).  When backend filtering differs even slightly
-        // (rule_type quirks, timezone, ack flag), the two diverge.
-        // Fix: ALSO fold live `pokaStatus` bypasses into the slot they
-        // started in (using `last_bypass_at`) so the modal is always
-        // consistent with the card.
         const slotsWithEvents = allSlots.map(s => {
           const ssMin     = toMin(s.start_time);
           const seMin     = toMin(s.end_time);
@@ -7177,10 +6280,6 @@ function FsCycleCommentsPanel({ lineId, partCode, machineName, isFallbackKey, is
   const [posting, setPosting] = useState(false);
   const [error, setError]     = useState("");
   const [savedTick, setSavedTick] = useState(0);
-  // 2026-09-15 — Leader attribution: dropdown defaults to the line's
-  // shift-assigned leader (set pre-shift by the shift incharge); the operator
-  // may override it for THIS comment only. Saved with the comment so reviewers
-  // (Comments History) know which line leader the note belongs to.
   const [leaderOpts, setLeaderOpts] = useState([]);
   const [leaderName, setLeaderName] = useState("");
   const token = (typeof window !== "undefined"
@@ -7262,8 +6361,6 @@ function FsCycleCommentsPanel({ lineId, partCode, machineName, isFallbackKey, is
     }
   }, [lineId, partCode, draft, token, leaderName, machineName]);
 
-  // 2026-05-27 — NG-aware styling so the panel matches the modal frame
-  // colour the operator just opened.  OK cycles keep the default look.
   const panelBg     = isNg ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)";
   const panelBorder = isNg ? "#ef4444"              : border;
   const titleColor  = isNg ? "#fecaca"              : textSub;
@@ -7358,9 +6455,6 @@ function FsCycleCommentsPanel({ lineId, partCode, machineName, isFallbackKey, is
           maxLength={2000}
           style={{
             flex: 1, padding: "6px 8px", fontSize: 13,
-            // 2026-05-27 — White textarea + dark text so operator typed
-            // content is high-contrast against panel background (matches
-            // wallboard side).  Save button below explicitly says SAVE.
             background: "#ffffff",
             color: "#0f172a",
             border: `1px solid ${isNg ? "#ef4444" : border}`,
@@ -7611,12 +6705,6 @@ function FsNgDetailsPanel({ lineId, partCode, border, text, textSub, textMut, bg
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// FsNgProcessRemarksPanel (2026-05-24)
-// One remark input per process/machine on this line for the current
-// NG part.  Each remark saves to mes_ng_process_remarks (UPSERT by
-// (part_code, machine_id)).  Quality dashboard pulls the summary.
-// ─────────────────────────────────────────────────────────────────
 function FsNgProcessRemarksPanel({ lineId, partCode, border, text, textSub, textMut, bgDeep }) {
   const [data,    setData]    = useState(null);  // { machines:[], remarks:[] }
   const [drafts,  setDrafts]  = useState({});    // machine_id -> text
@@ -7759,13 +6847,6 @@ function FsNgProcessRemarksPanel({ lineId, partCode, border, text, textSub, text
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// NgListModal
-// Opens when operator clicks the NG count cell in the slot table.
-// Renders a table of every NG part in that slot with 4 columns:
-//   Part Code | Time | Machine alarm | Leader remark (editable)
-// Inline save on each row — no submit-and-reload flow needed.
-// ─────────────────────────────────────────────────────────────────
 function NgListModal({ lineId, idealCt, date, slotLabel, onClose, onPlayVideo, border, bgDeep, text, textSub, textMut, overlayPosStyle }) {
   const [rows,    setRows]    = useState([]);
   const [loading, setLoading] = useState(true);
@@ -7783,12 +6864,6 @@ function NgListModal({ lineId, idealCt, date, slotLabel, onClose, onPlayVideo, b
       .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
       .then(d => {
         if (stopped) return;
-        // 2026-06-18 — register=truth NG list.  The backend /ng-list is now
-        // the SINGLE NG filter (keeps every real NG incl. no-barcode scan-fails
-        // — the PLC register D102 counts those — and drops only phantom/gap-junk
-        // by CT).  So show exactly what it returns; do NOT re-filter on
-        // part_code here (that wrongly hid genuine NGs the operator didn't
-        // barcode-scan → 5 of 6 NG vanished).  No-barcode rows render labelled.
         const rs = Array.isArray(d.rows) ? d.rows : [];
         setRows(rs);
         const initialDrafts = {};
@@ -8134,16 +7209,12 @@ function LossRemarkModal({ lineId, payload, onClose, border, bgDeep, text, textS
   const [savedAt, setSavedAt] = useState(null);
   const token = (typeof window !== "undefined"
                    && sessionStorage.getItem("mes_token")) || "";
-  // 2026-10-07 — andon breakup for this slot (operator: "is card me har call
-  // ka breakup bhi de de — kitne maintenance ke, kitne time ka").
   const [andon, setAndon] = useState(null);
   useEffect(() => {
     if (!lineId || !date || !slot_label) return;
     let stop = false;
     const qs = new URLSearchParams({ line_id: String(lineId), date, slot: slot_label });
     if (shift_name) qs.set("shift", shift_name);
-    // 2026-10-07 (2) — only the CLICKED loss's calls (operator: "breakdown pe
-    // click kiya to sirf breakdown ke call, aur har call pe remark").
     if (loss_type) qs.set("loss_type", loss_type);
     fetch(`/api/andon/slot-calls?${qs.toString()}`,
           { headers: token ? { Authorization: `Bearer ${token}` } : {} })
@@ -8226,11 +7297,6 @@ function LossRemarkModal({ lineId, payload, onClose, border, bgDeep, text, textS
     return () => { stopped = true; };
   }, [lineId, date, shift_name, slot_label, loss_type, token]);
 
-  // 2026-06-02 — synchronous in-flight guard.  React's `saving` state and the
-  // SAVE button's disabled prop both update ASYNC, so a fast double-click /
-  // Enter+click can slip save() through TWICE in one tick -> two POSTs -> the
-  // backend UPSERT turns the first into a duplicate "Previous remark".  This
-  // ref flips synchronously, so the second call is blocked immediately.
   const inFlight = useRef(false);
 
   const save = useCallback(async () => {

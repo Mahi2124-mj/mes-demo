@@ -49,11 +49,6 @@ const FS_OK    = "#22c55e";   // RUNNING green
 const FS_BAD   = "#ef4444";   // BREAKDOWN red
 const FS_WARN  = "#f59e0b";   // amber (exactly on threshold)
 
-// ── Theme ────────────────────────────────────────────────────────
-// 2026-05-18-r13 — `D` (dark flag) reads localStorage on module load
-// so the Light/Dark header toggle can persist + apply on reload.
-// Default is dark — 65" shop-floor TVs are easier on operator eyes
-// in dark mode + most rooms are dimly lit.
 const D = (() => {
   try {
     return localStorage.getItem("wb_theme") !== "light";
@@ -63,23 +58,8 @@ const D = (() => {
 })();
 const bg       = D ? "#0a0e1a" : "#f1f5f9";
 const card     = D ? "#0f1729" : "#ffffff";
-// 2026-08-10 — Reference point for the loading cover's progress bar.
-// This was the buffer GATE (playback waited until 20% of the clip was buffered).
-// The gate is gone — the <video> now autoPlays on the first bytes, exactly like
-// Fullscreen does, because the same cycle felt instant there and laggy here.
-// The value survives only to scale the "Loading cycle video · NN%" bar, so it
-// reads full about when playback takes over instead of crawling to 100%.
 const VID_PLAY_AT = 0.20;
 
-// 2026-08-10 — SPECULATIVE CLIP WARM.
-// A cycle clip does not exist as a file: it is transcoded out of the camera's
-// rolling .ts on demand, which is the 2-4 s wait on the first click.  The
-// /wallboard-cycles poll already warms each machine's newest cycles, but a
-// shift has 200+ over-target cycles per machine — far too many to render
-// speculatively — so the ones the operator is actually about to open have to
-// be named from here: when the over-target list opens, and on hover, a beat
-// before the click.
-// Fire-and-forget; `_warmed` keeps hover from re-asking for the same cycle.
 const _warmed = new Set();
 function warmClips(lineId, subId, seqs) {
   if (!lineId) return;
@@ -123,12 +103,6 @@ function ctStroke(color) {
        : "#7c2d12";        // dark orange
 }
 
-// ── Helper: Chart.js-backed CT chart (identical to Fullscreen.jsx) ───
-// ─────────────────────────────────────────────────────────────────
-// 2026-06-06 — OVER-TARGET 30-day popup (operator: click the OVER TARGET
-// badge → last-30-day over-target graph, A-shift & B-shift separate, toggle
-// between % and cycle-count).  Data from GET /over-target-history.  Additive.
-// ─────────────────────────────────────────────────────────────────
 function OtBars({ title, rows, metric, color = "#f59e0b", onToday }) {
   const data = (rows || []).map(r => ({
     date: r.date, md: String(r.date || "").slice(5),
@@ -179,12 +153,6 @@ function OtBars({ title, rows, metric, color = "#f59e0b", onToday }) {
   );
 }
 
-// 2026-10-06 — AVG CT view inside the OVER TARGET popup (operator: "har hour
-// me jitne parts bane unka avg cycle time", on every process).  One bar per
-// hourly slot of the chosen date + shift; defaults to the shift the board is
-// showing.  Data from GET /hourly-avg-ct: avg CT = the hour's planned working
-// time ÷ parts made in it (operator: "ek ghante me 3600 seconds … plan ke
-// according"), not the mean of the cycle times.
 function OtHourlyAvg({ lineId, subId, ideal, D }) {
   const [sel, setSel]   = useState({ date: "", shift: "" });   // "" = server default
   const [data, setData] = useState(null);
@@ -310,22 +278,12 @@ function OtHourlyAvg({ lineId, subId, ideal, D }) {
 }
 
 function OtTable({ cycles, ideal, onVideo, onBack, D, lineId, isMain, machineId, shiftName }) {
-  // 2026-06-09 — CT sort toggle: default = cycle_seq DESC (latest first);
-  // click CT header → max→min (▼) → min→max (▲) → default.
   const [ctSort, setCtSort] = useState(null);   // null | "desc" | "asc"
   const cycleCtSort = () => setCtSort(s => s === "desc" ? "asc" : s === "asc" ? null : "desc");
   const ctArrow = ctSort === "desc" ? " ▼" : ctSort === "asc" ? " ▲" : " ⇅";
 
-  // 2026-06-20 — Comment filter (composes WITH the CT sort): All / Commented /
-  // No comment.  Lets the operator find big-CT cycles that have no note yet
-  // (e.g. CT max→min + "No comment" → biggest uncommented cycles on top).
   const [cmtFilter, setCmtFilter] = useState("all");   // "all" | "filled" | "unfilled"
 
-  // 2026-06-11 — COMMENT column: show the LATEST note added on each cycle via
-  // the video floating box — works for Final/main AND sub machines, and notes
-  // added from Fullscreen too (all share the same per-cycle key).  ONE batch
-  // fetch of today's notes, polled live; we re-render ONLY when the data
-  // actually changes (JSON guard) so the table never flickers.
   const [cmtMap, setCmtMap] = useState({});
   const cmtJsonRef = useRef("");
   useEffect(() => {
@@ -344,12 +302,6 @@ function OtTable({ cycles, ideal, onVideo, onBack, D, lineId, isMain, machineId,
         .then(d => {
           if (stop) return;
           const m = {};
-          // rows arrive newest-first → first seen per key = LATEST note.
-          // 2026-09-19 — keyed by part_code AND shift.  `cycle_<seq>_<date>`
-          // carries no shift, and cycle numbers restart every shift, so the
-          // A-shift note on #648 was showing on B-shift #648 (operator: "comment
-          // aa raha hai jabki kisi ne post nahi kiya" — YNC/YCA/YHB/Y17).  The
-          // clip's own comment box was already shift-scoped; this list was not.
           for (const r of (d.rows || [])) {
             const pc = r && r.part_code;
             if (!pc) continue;
@@ -576,12 +528,6 @@ function OtModal({ data, metric, setMetric, machineName, onClose, D, otCycles, o
             };
 
             if (isMain && Array.isArray(lossAll) && lossAll.length) {
-              // 2026-08-11 — ONE VERTICAL COLUMN, gain at the top down to the
-              // biggest loss.  The wrapped row this replaced was absolutely
-              // centred and rode over the title and the % / cycles toggle; in
-              // normal flow the header just grows to fit and nothing overlaps.
-              // Sorted ascending, so the negatives (green gains) sit first and
-              // the worst loss lands at the bottom — the column reads top-down.
               const ordered = [...lossAll].sort((x, y) => Number(x.loss) - Number(y.loss));
               return (
                 <div style={{
@@ -645,38 +591,15 @@ function OtModal({ data, metric, setMetric, machineName, onClose, D, otCycles, o
 
 function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lossAll, chartReady, lineId, okOverride, ngOverride, shiftName }) {
   const _rawCycles = machine.cycles || [];
-  // 2026-06-04 — Upper-Rail anti-swap DISPLAY safeguard.  A cycle flagged NG
-  // with ~0s CT is a register-mirror PHANTOM (the collector OK<->NG swap
-  // artifact — root-fixed at source 2026-06-04, but pre-fix rows remain in
-  // ct_log).  It's real production mislabeled, so: (a) drop it from the chart
-  // window (no real cycle-time to plot — kills the red 0.0s flood), and
-  // (b) still count it as OK production via _phantomOk.  Machines with no
-  // 0s-NG rows are unaffected (_phantomOk = 0, allCycles unchanged).
   const _isPhantom = (c) => c.is_ng && c.ct != null && Number(c.ct) < 0.1;
   const _phantomOk = _rawCycles.filter(_isPhantom).length;
-  // 2026-06-10 — also drop shift-start "burst" phantoms: implausibly fast
-  // cycles (CT < half the ideal) that the PLC register NEVER counts (08:30
-  // warm-up scan-fail rows, duplicate cycle_seq).  Unlike the 0s-NG above
-  // these are NOT counted as OK — just excluded from the chart + cycle counts
-  // + over-target.  Applies to main + subs (each vs its own ideal).
   const _isBurstPhantom = (c) =>
     c.ct != null && idealCt > 0 && Number(c.ct) < idealCt * 0.5;
   const allCycles  = _rawCycles.filter(c => !_isPhantom(c) && !_isBurstPhantom(c));
-  // 2026-10-07 — the NUMBER shown for a cycle.  cycle_seq is the machine's
-  // own count register: on most machines it resets every shift (= the part
-  // number), but some PLCs never reset it — YMC-SS Semi-Auto D5201 showed
-  // #61327… on a shift that had made 1050 parts.  Same rule as the OK tag
-  // (_seqCount below): when the register runs far past this shift's cycle
-  // count, number the parts by their place in the shift (1, 2, 3 …) instead.
-  // cycle_seq itself is untouched (video lookup, comment keys).
   const _seqMaxAll  = allCycles.length ? Math.max(...allCycles.map(c => Number(c.cycle_seq) || 0)) : 0;
   const _seqIsShift = _seqMaxAll > 0 && _seqMaxAll <= allCycles.length * 1.5;
   allCycles.forEach((c, i) => { c._no = _seqIsShift ? c.cycle_seq : i + 1; });
   const cycNo = (c) => (c && c._no != null ? c._no : c?.cycle_seq);
-  // 2026-05-28 — Operator: "thoda gap kr de ct to ct kuch dikh nhi rha".
-  // Window halved (50 → 25) so each cycle gets ~2x horizontal space —
-  // CT labels above dots no longer overlap, stats clearly readable.
-  // Scrollbar at bottom still lets operator scroll through older cycles.
   const WIN = 25;
 
   // Window state: default = sticky to END (latest 50).
@@ -684,7 +607,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
     Math.max(0, allCycles.length - WIN));
   const [sticky, setSticky]     = useState(true);
 
-  // 2026-06-06 — OVER TARGET 30-day popup (click the badge).
   const [otModal,  setOtModal]  = useState(null);    // {rows, ideal_ct} | null
   const [otMetric, setOtMetric] = useState("pct");   // "pct" | "count" | "avg"
   const _otOpen = () => {
@@ -708,16 +630,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
   const cycles  = allCycles.slice(winStart, winStart + WIN);
   const maxWin  = Math.max(0, allCycles.length - WIN);
 
-  // ── TOTAL LOSS (shown inside the OVER TARGET popup) ────────────────
-  // Comes from the SERVER (wallboard-cycles → loss_seconds), which sums
-  // (ct − ideal) ONLY over cycles that completed while the LINE status was
-  // RUNNING.  Operator spec: "koi bhi loss jisme line ruki hui hai voh count
-  // nahi hoga ... sub-machines ka bhi status final ke equivalent hi maana
-  // jayega" — so breakdown / material-wait never inflates it, and every
-  // sub-machine follows the Final Inspection status.
-  // Signed: a machine that beat its ideal all shift reads as a gain.
-  // Re-read on every poll (8 s), so the popup ticks live while it is open.
-  // Falls back to a client-side sum if an older API omits the field.
   const lossSec = (machine.loss_seconds != null)
     ? Number(machine.loss_seconds)
     : allCycles.reduce(
@@ -733,30 +645,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
     }
 
     const idealCT = idealCt;
-    // 2026-05-18-r7 — Y-AXIS dynamic cap, scaled per-machine idealCT.
-    // Operator complaint: "ISME DEKHEGA TO SARI DOT DOT HI DIKH RHI H
-    // BECAUSE KUCH BICH BICH ME CYCLE TIME BHOT BDH JATA H".  A single
-    // 300s outlier was forcing the y-axis to auto-scale to 300, which
-    // crushed every normal 14-18s cycle into a flat band at the bottom.
-    //
-    // 2026-05-20 — Earlier Y_CAP was hardcoded to 40s.  That worked for
-    // 15s-ideal lines (15+25 headroom) but broke when a row's ideal CT
-    // was 30s — the cap stayed at 40 so anything over 40s clamped and
-    // the line looked like it was hugging the ceiling.  Operator spec:
-    // "mera ct 15 tha to mnne 40 pe set kia tha, jb 30 kr dia to bhi
-    // bdhna chahiye na isse +25sec ho jaye".
-    //
-    // Formula: Y_CAP = idealCT + 25.  Gives:
-    //   ideal 15s → cap 40s  (matches old hardcoded)
-    //   ideal 30s → cap 55s
-    //   ideal 45s → cap 70s
-    //
-    // 2026-05-21 — Y_MIN must NEVER cut off real cycle data.
-    // Earlier formula `idealCT - 10` worked when actual CTs ≈ ideal,
-    // but Final Inspection has DB ideal=30s while real cycles run at
-    // 12-15s.  That set Y_MIN=20 and clipped every cycle below the
-    // chart band → graph appeared blank.  Now we ALSO consider the
-    // observed minimum cycle time and use whichever is lower.
     const Y_CAP = Math.max(20, (idealCT || 15) + 25);
     const _observedCTs = cycles.map(c => c.ct).filter(v => v != null && v > 0);
     const _observedMin = _observedCTs.length ? Math.min(..._observedCTs) : (idealCT || 15);
@@ -768,14 +656,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
       )
     );
     const plotData = cycles.map(c => c.ct == null ? null : Math.min(c.ct, Y_CAP));
-    // 2026-05-24 — NG dots ALWAYS red regardless of CT, so the operator
-    // immediately spots a rejected part vs a slow-but-OK cycle.
-    // 2026-06-01 — OK dots ALWAYS green now (binary, like Fullscreen.jsx).
-    // Earlier OK-but-slow cycles (CT > ideal) were painted red via the
-    // CT-based _ptClr, which operators misread as a reject.  Operator:
-    // "dono ko green wale jaisa kr de, bs jo actual NG h uska symbol rahe".
-    // Only the DOTS go binary — the LINE segment colour below stays
-    // CT-vs-ideal (red above ideal / green below) per the 2026-05-28 spec.
     const ptColors = cycles.map(cy => cy.is_ng ? FS_BAD : FS_OK);
     // NG dots also bigger so they stand out + white border ring.
     const ptRadius = cycles.map(cy => cy.is_ng ? 5 : 2);
@@ -853,29 +733,13 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
       ],
     };
 
-    // 2026-05-18-r7 — Hard-fix y-axis upper bound at Y_CAP (40s).  No
-    // more "Math.max(..., observed_max)" — outliers stay clamped, the
-    // normal-cycle resolution stays readable.
     const yMax = Y_CAP;
     const options = {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
       layout: { padding: { top: 12, bottom: 2, left: 4, right: 8 } },
-      // 2026-05-18-r5 — `intersect:false, mode:"index"` so a click
-      // ANYWHERE along an X-column opens that cycle's video.  Previous
-      // `intersect:true` required pixel-perfect hit on a 4-6px dot,
-      // which is brutal on a 65" wallboard from operator distance.
       interaction: { intersect: false, mode: "index", axis: "x" },
-      // 2026-05-18-r5 — Click a dot (or anywhere along its X-column)
-      // = open per-cycle video popup.  Operator spec:
-      // "BHAI CYCLE TIME KE JO POINTS AI UNKE ONCLICK PRR VIDEO AANI
-      // CHASIYE".  Two fallback paths so the click is never silently
-      // dropped:
-      //   1. Chart.js `activeElements` — works when the click is inside
-      //      the dataset interaction zone.
-      //   2. Manual X→index mapping via evt.native.offsetX → cycle
-      //      lookup.  Catches clicks in dead zones between dots.
       onClick: (evt, els /*, chart param shadows outer */) => {
         let idx = -1;
         const hit = els && els.find ? els.find(e => e.datasetIndex === 0) : null;
@@ -909,17 +773,8 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
         legend: { display: false },
         tooltip: {
           enabled: true,
-          // 2026-05-18-r14 — Filter out the dashed Ideal-reference
-          // dataset (dataIndex 1) so the tooltip doesn't double-print
-          // the CT value.  `intersect:false, mode:"index"` fires the
-          // label callback for ALL datasets at the hovered X column;
-          // without this filter the operator saw `30.24s · tap for
-          // video` twice (once for CT line, once for Ideal line —
-          // both labeled with the same parsed.y from cycles[idx].ct).
           filter: (tooltipItem) => tooltipItem.datasetIndex === 0,
           callbacks: {
-            // 2026-05-24 — Full per-cycle details on hover.  No "clamped"
-            // tag — autoscale handles outliers now.
             title: i => {
               const cy = cycles[i[0].dataIndex];
               return `Cycle #${cy ? cycNo(cy) : i[0].label}`;
@@ -941,9 +796,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
               ];
             },
           },
-          // 2026-05-27 — NG cycles get a red tooltip box (matches the
-          // Final-Inspection styling).  Pulls is_ng off the cycle row
-          // being hovered.  OK styling unchanged.
           backgroundColor: ctx => {
             const idx = ctx.tooltip?.dataPoints?.[0]?.dataIndex;
             const cy  = idx != null ? cycles[idx] : null;
@@ -972,8 +824,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
       },
       scales: {
         x: {
-          // 2026-05-24 — bigger / bolder cycle-seq labels at the bottom
-          // so operator can read part serial numbers from a distance.
           ticks: {
             color: "#e2e8f0",
             font: { size: 11, weight: "bold", family: "monospace" },
@@ -995,48 +845,21 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
     };
 
     if (chartRef.current) {
-      // 2026-05-18-r5 — Re-assign data + options, then call update().
-      // Chart.js holds the click handler in a sticky reference, but as
-      // long as `cycles` is the same array slice we built this effect
-      // run with (closure capture), the latest data lands.  The
-      // double-update (`reset` keeps animation off) makes the new
-      // handler functions take effect even if Chart.js cached the old.
-      // 2026-05-27 — Stash latest cycles on the chart instance so the
-      // ngMarkerPlugin (registered ONCE at chart creation) can read
-      // the freshest data instead of its stale closure capture.
-      // Earlier symptom: ⚠ markers persisted on cycles that weren't
-      // NG anymore — operator saw bogus NG flags on the wallboard.
       chartRef.current._cyclesRef = cycles;
       chartRef.current.data       = data;
       chartRef.current.options    = options;
       chartRef.current.update("none");
     } else {
-      // 2026-05-24 — Per-dot CT label plugin.  Operator spec: "dot pe
-      // ct ok sirf ng ka front pe show ho with symbol and ok".
-      // Renders for EVERY visible dot:
-      //   • OK cycle → green CT number ABOVE the dot
-      //   • NG cycle → red ⚠ symbol + red CT number ABOVE the dot
-      // Hover tooltip still shows full details (cycle seq, CT, time, status).
       const ngMarkerPlugin = {
         id: "perDotLabel",
         afterDatasetsDraw(chart) {
           const meta = chart.getDatasetMeta(0);
           if (!meta || !meta.data) return;
-          // 2026-05-27 — Read cycles from the chart instance (set on
-          // every update at line ~390 above) instead of the stale
-          // closure capture from chart-creation time.  Falls back to
-          // the captured `cycles` only on the very first render before
-          // _cyclesRef has been attached.
           const liveCycles = chart._cyclesRef || cycles;
           const ctx2 = chart.ctx;
           ctx2.save();
           ctx2.textAlign    = "center";
           ctx2.textBaseline = "bottom";
-          // 2026-09-07 — Anti-clutter: with a full shift of cycles the per-dot
-          // CT numbers overlapped into an unreadable smear ("cycle congested").
-          // NG dots ALWAYS keep their ⚠ + red CT (they matter); OK numbers are
-          // only drawn when at least MIN_GAP px past the last label — so on any
-          // width they thin out to a readable spacing (wider chart = more shown).
           const MIN_GAP = 26;
           let lastLabelX = -Infinity;
           meta.data.forEach((pt, i) => {
@@ -1067,8 +890,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
       chartRef.current = new window.Chart(canvasRef.current.getContext("2d"), {
         type: "line", data, options, plugins: [ngMarkerPlugin],
       });
-      // 2026-05-27 — Seed _cyclesRef on first creation too so the
-      // plugin's very first draw also sees fresh data, not closure.
       chartRef.current._cyclesRef = cycles;
     }
   }, [cycles, idealCt, chartReady]);
@@ -1093,15 +914,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
     );
   }
 
-  // 2026-05-18 — Y-axis FIXED RANGE = 0 → 3×ideal_ct.  Earlier we used
-  // `max(ideal*2, observed_max)` which let a single 300s outlier
-  // compress every other cycle into a thin line at the bottom of the
-  // chart — operator couldn't see spikes against the ideal line.
-  // Now the visible range is 0..3×ideal (≈ 0-45s for ideal=15); anything
-  // taller clamps to the top edge.  An "outlier counter" badge in the
-  // header tells the operator how many clipped points exist so they
-  // can drill in via Historical when needed.
-  // Latest CT (big number on right) — color follows 3-tier rule
   const last      = cycles[cycles.length - 1];
   const lastColor = ctColor(last.ct, idealCt);
 
@@ -1122,9 +934,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
       <div style={{ display: "flex", alignItems: "center",
                     justifyContent: "space-between", height: 22,
                     padding: "0 6px",
-                    // 2026-08-06 — positioning context for the centred LOSS
-                    // chip below, so it sits dead-centre of the row instead of
-                    // drifting with the title / OK-NG widths.
                     position: "relative" }}>
         <div style={{
           fontSize: isMain ? 14 : 13,
@@ -1132,10 +941,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
           // Title must never run under the centred LOSS chip.
           flex: 1, minWidth: 0, overflow: "hidden",
           textOverflow: "ellipsis", whiteSpace: "nowrap",
-          // 2026-05-18-r16 — Final Inspection title text matches the
-          // other machine rows (operator: "blue colour kyu aa rha h
-          // usko thik kr").  The ★ prefix still distinguishes the
-          // main row visually, no need for a blue tint.
           color: text,
           letterSpacing: ".02em",
         }}>
@@ -1160,12 +965,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
               can see per-machine reject rate at a glance.  NG count
               shown in red, OK in green. */}
           {(() => {
-            // 2026-06-06 — Main (Final) reads the PLC register (okOverride/
-            // ngOverride from summary.kpi) — the SAME source the Fullscreen reads,
-            // so the two UIs ALWAYS match.  OK has a 619-stuck guard: if the
-            // register carries a previous shift's count (>> this shift's real
-            // cycle count) show the real count.  NG = D102 register.  Sub-machines
-            // use cycle_seq (= their own D-register, per-shift, auto-reset).
             const _okCy = allCycles.filter(c => !c.is_ng);
             const _ngCy = allCycles.filter(c => c.is_ng);
             const _maxSeq   = (arr) => arr.length ? Math.max(...arr.map(x => Number(x.cycle_seq) || 0)) : 0;
@@ -1216,9 +1015,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
             pointerEvents:none so dot-tap (video) + panel-open pass through. */}
         {(() => {
           const over  = allCycles.filter(c => c.ct != null && c.ct > idealCt).length;
-          // 2026-06-06 — denominator = the SAME register-pinned per-shift cycle
-          // count as the OK/NG tags (MAX cycle_seq), for main + subs alike, so
-          // "of N" always matches the OK/NG / slider count.
           const _allMax = allCycles.length ? Math.max(...allCycles.map(c => Number(c.cycle_seq) || 0)) : 0;
           const total = (_allMax > 0 && _allMax <= allCycles.length * 1.5) ? _allMax : allCycles.length;
           const pct   = total ? Math.round((over / total) * 100) : 0;
@@ -1303,11 +1099,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
   );
 }
 
-// ── Floating panel (hourly slots for hovered machine) ─────────────
-// 2026-05-18 — Operator wanted this as a floating window over the
-// content, not a fixed side column.  Positioned absolutely at the
-// top-right of the chart area with backdrop blur + shadow so it
-// reads as a popover.  Clicking outside or the ✕ closes it.
 function HourlyPanel({ machine, slots, onClose }) {
   if (!machine) return null;
   return (
@@ -1446,11 +1237,6 @@ function HourlyPanel({ machine, slots, onClose }) {
 export default function WallboardLeft() {
   // Player element, so the always-visible progress bar can read its time.
   const vidRef = useRef(null);
-  // 2026-08-10 — the URL may carry a NAME ("/wallboard/left/YHB-SS") or the
-  // numeric id ("/wallboard/left/11").  A numeric URL is used verbatim, so every
-  // existing wall display / bookmark keeps working with zero extra requests; a
-  // named URL costs one tiny anonymous lookup before the first poll.  Every API
-  // call below still uses the numeric id, so nothing else had to change.
   const { lineId: lineRef } = useParams();
   const [resolvedId, setResolvedId] = useState(
     /^\d+$/.test(lineRef || "") ? lineRef : null);
@@ -1467,10 +1253,6 @@ export default function WallboardLeft() {
   const lineId = resolvedId;
   const [data, setData] = useState(null);
   const [summary, setSum] = useState(null);
-  // 2026-09-13 — Loop Pipe line-switcher (Loop Pipe lines only): when THIS line
-  // is a Loop Pipe line the header line-NAME turns into a dropdown listing every
-  // Loop Pipe line so the Supervisor wall can switch between them. Empty for
-  // every other line → the line name stays plain text.
   const [loopLines, setLoopLines] = useState([]);
   const [loopMenuOpen, setLoopMenuOpen] = useState(false);
   useEffect(() => {
@@ -1495,9 +1277,6 @@ export default function WallboardLeft() {
       .catch(() => { /* keep last known list on transient errors */ });
     return () => { alive = false; };
   }, [lineId]);
-  // 2026-10-08 — pending breakdown slips of this line (operator: "supervisor
-  // dashboard me upar number, click pe kaun si slip pending aur kab se").
-  // Polled every minute; the header pill opens the list.
   const [bdPend, setBdPend] = useState(null);
   const [bdOpen, setBdOpen] = useState(false);
   useEffect(() => {
@@ -1514,28 +1293,12 @@ export default function WallboardLeft() {
     const t = setInterval(load, 60000);
     return () => { alive = false; clearInterval(t); };
   }, [lineId]);
-  // 2026-05-18-r5 — `pickedMachine` / hourly-panel wiring removed per
-  // operator spec.  Chart-dot clicks now go straight to the video
-  // popup; the per-machine slot summary panel is dead code (kept in
-  // the file for easy re-enable later).
   const [chartReady, setChartReady] = useState(!!window.Chart);
   useChartJS(() => setChartReady(true), []);
 
-  // 2026-05-18-r5 — Cycle-video popup state.  Opened when the operator
-  // clicks a dot on any machine row's CT chart.  Stays mounted until
-  // explicitly closed (backdrop click / × button) so seek-back is OK.
   const [videoCycle, setVideoCycle] = useState(null); // {machine, cycle, url, isMain}
-  // 2026-08-10 — cover the <video> while the clip renders + buffers.  The
-  // browser's own round spinner looked like a stall on the shop-floor TV;
-  // this drives a calm shimmer + progress bar instead.  Cleared the moment
-  // playback actually starts (see onPlaying / the 50%-buffered gate).
   const [vidLoading, setVidLoading] = useState(false);
   const [vidBuffered, setVidBuffered] = useState(0);   // 0..1
-  // 2026-08-12 — kill the browser's default body margin while this wall
-  // display is mounted.  There is no CSS reset in this app, so `body { margin:
-  // 8px }` was letting the white page background show as a border all the way
-  // round the dark dashboard on the 65" panel.  Restored on unmount so the
-  // ordinary padded pages are unaffected.
   useEffect(() => {
     const b = document.body, prevM = b.style.margin, prevBg = b.style.background;
     b.style.margin = "0";
@@ -1544,26 +1307,12 @@ export default function WallboardLeft() {
   }, []);
 
   const [vidStall,    setVidStall]    = useState(false); // stalled AFTER play began
-  // 2026-08-11 — show the operator how long they have actually been waiting,
-  // and log it.  A ticking number reads as "working" where a frozen spinner
-  // reads as "hung", and it turns "video slow hai" into a measured figure on
-  // the Waiting Time page.
   const [vidWait, setVidWait] = useState(0);      // seconds, ticking
   const vidTimerRef = useRef(null);               // stopwatch -> telemetry
   const vidSrcRef   = useRef(null);               // promise of X-Clip-Source
   const vidWaitStart = useRef(0);                 // elapsed is measured, not accumulated
-  // A <video> tag never exposes response headers, so ask for one byte and read
-  // X-Clip-Source off that — tells the Waiting Time page whether the clip came
-  // off the archive or was transcoded on the click.  Defined at component scope
-  // so the <video onLoadStart> handler (in render) can call it — it used to be a
-  // local const inside openCycleVideo, which threw "_probeSrc is not defined" in
-  // render and meant the probe never ran.
   const _probeSrc = useCallback((u, el) => {
     try {
-      // Kept as a promise as well as on the element: an archived clip starts
-      // playing in ~90 ms, long before this resolves, so reading the dataset
-      // synchronously labelled every fast sample "render" — the Waiting Time
-      // page then showed 0 archive hits while most clicks were archive hits.
       vidSrcRef.current = fetch(u, { headers: { Range: "bytes=0-0" } })
         .then(r => {
           const s = r.headers.get("x-clip-source") || "render";
@@ -1576,20 +1325,6 @@ export default function WallboardLeft() {
   const openCycleVideo = useCallback((machine, cy, isMain) => {
     if (!cy || cy.ct == null) return;
     const token = sessionStorage.getItem("mes_token") || "";
-    // Cycle-video endpoints differ for main line vs sub-machines — both
-    // accept ?token= for HTML5 <video src=...> auth.
-    // 2026-07-31 — `r=` is now the CYCLE, not Date.now().  A timestamp made
-    // every re-click a brand-new URL, so the clip could never be reused from
-    // the browser (or a Cloudflare edge) and was re-pulled across the site's
-    // single internet uplink every single time.  Keyed on the cycle it still
-    // busts correctly between different dots, and a given cycle's clip is
-    // immutable so reusing it is always right.  (The retry path below appends
-    // its own Date.now() when a load genuinely fails.)
-    // 2026-08-11 — say WHICH row was clicked.  An Alarm row and an OK row can
-    // carry the same cycle_seq, so without this the server just took the later
-    // one and the wrong clip could play.  For an Alarm the server also extends
-    // the clip through the NEXT cycle, returning one continuous video.  The
-    // cache-buster gets an "n" for Alarms so the two never share a cached URL.
     const _ngQ = `&ng=${cy.is_ng ? 1 : 0}`;
     const _r   = `${cy.cycle_seq}${cy.is_ng ? "n" : ""}`;
     const url = isMain
@@ -1619,19 +1354,6 @@ export default function WallboardLeft() {
   }, []);
   const [now, setNow]   = useState(new Date());
 
-  // 2026-05-18-r8 — TWO-AXIS ORIENTATION MODEL (mirrors Fullscreen.jsx).
-  //   • orientation  : which CSS grid layout to render (portrait vs landscape).
-  //                    Default = match viewport shape; manual button + R-key
-  //                    can override.
-  //   • viewportPortrait : live tracker of innerHeight>innerWidth so we know
-  //                    whether the viewport itself is tall.
-  //   • needsRotation : true only when the operator-picked layout differs
-  //                    from the viewport's natural shape (e.g. portrait
-  //                    layout requested while browser viewport is landscape
-  //                    — the vertical-mounted 16:9 panel case).  Only in
-  //                    that mismatch case do we CSS-rotate 90°.
-  // This stops desktop users from seeing sideways content on landscape
-  // browsers while still letting shop-floor TVs run rotated layouts.
   const _detectOrient = () =>
     (typeof window !== "undefined" && window.innerHeight > window.innerWidth)
       ? "portrait" : "landscape";
@@ -1641,11 +1363,6 @@ export default function WallboardLeft() {
     typeof window !== "undefined" && window.innerHeight > window.innerWidth);
   const needsRotation = isPortrait !== viewportPortrait;
 
-  // 2026-05-18-r13 — Auto-correct orientation ONLY when viewport
-  // shape actually FLIPS (mirrors Fullscreen.jsx).  Same-shape
-  // resizes (scrollbar appear/disappear, etc.) used to wipe the
-  // operator's manual 9:16 toggle the moment they clicked it.  Ref
-  // remembers the last shape so we know when an honest flip occurs.
   const prevVpShapeRef = useRef(
     typeof window !== "undefined" && window.innerHeight > window.innerWidth);
   useEffect(() => {
@@ -1682,13 +1399,6 @@ export default function WallboardLeft() {
          .catch(() => {});
   }, [lineId]);
 
-  // 2026-08-10 — Tab title carries the LINE'S OWN NAME, not "Wallboard L ·
-  // Line 27".  Operators keep a Machine CT tab open per line; a narrow tab
-  // shows only the first few characters, so "Wallboard…" made every tab look
-  // identical and the line id was never visible.  Name first, exactly like
-  // Fullscreen.jsx already does.  Separate effect so it can re-run when the
-  // name arrives from /wallboard-summary without restarting the poll timers
-  // below (those are keyed on the fetchers).
   useEffect(() => {
     const nm = summary?.kpi?.line_name;
     document.title = nm ? `${nm}.SUPERVISOR` : `SUPERVISOR · Line ${lineId || lineRef}`;
@@ -1715,12 +1425,6 @@ export default function WallboardLeft() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // 2026-06-17 — Esc closes the per-cycle video popup.  The × button's
-  // title already said "Close (Esc)" but the key was never wired.  The
-  // listener mounts only while a video is open and tears down on close,
-  // so it never interferes with the R-orientation shortcut otherwise.
-  // Safety net: if `playing` never fires (autoplay blocked, dead decoder)
-  // don't let the loading cover sit on top of the clip forever.
   useEffect(() => {
     if (!vidLoading) return;
     const t = setTimeout(() => setVidLoading(false), 30000);
@@ -1737,11 +1441,6 @@ export default function WallboardLeft() {
     return () => window.removeEventListener("keydown", onEsc);
   }, [videoCycle, closeVideo]);
 
-  // 2026-05-18-r13 — Reverse seq order per operator spec.  Backend
-  // returns subs sorted by machine_seq ASC (M-1, M-2, …); operator
-  // wants display order: Final Inspection (main), then Semi-Auto (M-6),
-  // Ball Guide-02 (M-5), Ball Guide-01 (M-4), Lower Rail, Lock Bar,
-  // Upper Rail (M-1) — i.e. subs DESC by machine_seq.
   const subs       = (data?.machines || []).slice().sort((a, b) =>
     (b.machine_seq || 0) - (a.machine_seq || 0)
   );
@@ -1749,14 +1448,6 @@ export default function WallboardLeft() {
   // Combined list: main row FIRST, then sub-machines
   const allRows    = mainRow ? [mainRow, ...subs] : subs;
 
-  // 2026-08-11 — per-machine gain/loss for the Final Inspection popup, which
-  // lists every machine separately instead of one combined figure.  Built from
-  // the same `loss_seconds` the individual chips use, so the popup can never
-  // disagree with the row it came from.  Final Inspection itself is skipped:
-  // it is the line's output, not a station, and showing it beside the stations
-  // reads as if it were one of them.  Rebuilt on every 8 s poll so it ticks live.
-  // 2026-08-11 — Final Inspection's own figure is listed too, alongside the
-  // stations, so the column shows the whole line in one place.
   const lossBreakdown = allRows
     .filter(m => m.loss_seconds != null)
     .map(m => ({
@@ -1766,20 +1457,12 @@ export default function WallboardLeft() {
     }));
   const shiftName  = data?.shift_name || "—";
 
-  // (hourlySlots derivation removed — slot panel no longer rendered.)
-
   const toggleFS = () => {
     const el = document.documentElement;
     if (!document.fullscreenElement) el.requestFullscreen?.();
     else document.exitFullscreen?.();
   };
 
-  // 2026-05-19 — REVERTED to ALWAYS-landscape popup.  Previous rev
-  // matched dashboard orientation (portrait dashboard → portrait
-  // popup); operator wanted popup to ALWAYS render upright relative
-  // to the physical screen.  React-Portal escapes the rotated
-  // dashboard's transform-ancestor so `position:fixed; inset:0`
-  // covers the natural viewport without inheriting any rotation.
   const overlayPosStyle = {
     position: "fixed",
     inset: 0,
@@ -1787,11 +1470,6 @@ export default function WallboardLeft() {
 
   return (
     <div style={{
-      // 2026-05-18-r8 — rotation controlled by `needsRotation`, NOT
-      // `isPortrait`.  Layout itself is portrait/landscape based on
-      // viewport shape; CSS rotation only kicks in when the layout
-      // direction doesn't match the viewport (vertical-mounted 16:9
-      // panel case).
       height:  needsRotation ? "100vw" : "100vh",
       width:   needsRotation ? "100vh" : "100%",
       background: bg, color: text,
@@ -2009,9 +1687,6 @@ export default function WallboardLeft() {
           {/* RUNNING / status pill — colour from summary KPI if present */}
           {(() => {
             const st = (summary?.kpi?.operating_status || "RUNNING").toUpperCase();
-            // 2026-10-07 — on andon lines this is the open call's own status
-            // (MAINTENANCE / TOOLROOM / QUALITY_ISSUE …), same colours as the
-            // MANAGEMENT screen's timeline.
             const SC = { RUNNING: okClr, BREAKDOWN: badClr, MAINTENANCE: badClr,
                          TOOLROOM: "#ec4899", QUALITY_ISSUE: "#f97316",
                          MATERIAL_WAIT: "#eab308", MODEL_SETUP: "#3b82f6",
@@ -2247,9 +1922,6 @@ export default function WallboardLeft() {
         >
           <div onClick={e => e.stopPropagation()}
                style={{
-                 // 2026-05-27 — Red frame for NG cycles (matches the
-                 // Fullscreen modal styling).  Operator: "ng pe sab
-                 // jagah red dikhna chahiye".  OK styling unchanged.
                  background: videoCycle.cy?.is_ng ? "#1a0a0d" : "#0a0f1a",
                  color: text,
                  border: videoCycle.cy?.is_ng
@@ -2338,29 +2010,14 @@ export default function WallboardLeft() {
             <video ref={vidRef} src={videoCycle.url}
                    muted
                    preload="auto"
-                   /* 2026-08-10 — autoPlay, matching Fullscreen.  This modal used
-                      to hold playback until VID_PLAY_AT of the clip was buffered;
-                      Fullscreen never did, which is exactly why the same cycle
-                      felt instant there and laggy here.  Operator: make both
-                      start on the first bytes. */
                    autoPlay
                    controlsList="nodownload noremoteplayback"
                    data-retry="0"
                    data-started="0"
                    onLoadStart={(e) => _probeSrc(videoCycle.url, e.currentTarget)}
                    onLoadedMetadata={(e) => {
-                     // 2026-05-27 — Playback rate stays 1.0 (real-time).
-                     // Server-side encoder is now NVENC p1 (fastest)
-                     // so the clip arrives 2-3× sooner; the perceived
-                     // "slow" was render latency, not playback speed.
                    }}
                    onProgress={(e) => {
-                     // 2026-07-28 — BUFFER-AHEAD before play.  Over the slow
-                     // shop-floor LAN `autoPlay` started on the first few KB
-                     // then stalled again and again (buffer→play→buffer =
-                     // irritating stutter).  Operator spec: don't play until
-                     // (Historic note: this used to hold playback until
-                     // VID_PLAY_AT was buffered.  autoPlay replaced that.)
                      const v = e.currentTarget;
                      if (v.dataset.started === "1") return;
                      const dur = v.duration;
@@ -2380,19 +2037,10 @@ export default function WallboardLeft() {
                      if (!v.paused) v.dataset.started = "1";
                    }}
                    onCanPlay={(e) => {
-                     // autoPlay only starts at HAVE_ENOUGH_DATA ("canplaythrough"),
-                     // which Chrome holds back while the link is busy.  Start as
-                     // soon as frames can be decoded; only for the first start, so
-                     // a later seek never overrides the operator's pause.
                      const v = e.currentTarget;
                      if (v.dataset.started !== "1" && v.paused) v.play().catch(() => {});
                    }}
                    onCanPlayThrough={(e) => {
-                     // Fallback: browser says it can play to the end without
-                     // stalling (e.g. a cached clip that buffered instantly) —
-                     // start now even if the buffer-gate tick was skipped.
-                     // Safety net only: if the browser blocked autoPlay for
-                     // any reason, kick it once we know it can play through.
                      const v = e.currentTarget;
                      if (v.dataset.started === "1") return;
                      v.dataset.started = "1";
@@ -2401,9 +2049,6 @@ export default function WallboardLeft() {
                    onPlaying={(e) => {
                      e.currentTarget.dataset.started = "1";
                      setVidLoading(false); setVidStall(false);
-                     // `X-Clip-Source: archive` means it came off disk; anything
-                     // else was transcoded on demand.  Recorded so a slow sample
-                     // can be traced to a cause instead of guessed at.
                      if (vidTimerRef.current) {
                        // Elapsed time is taken now; only the source label waits
                        // for the probe (see api/timing.js).
@@ -2436,10 +2081,6 @@ export default function WallboardLeft() {
                      display: "block",
                    }}
                    onError={(e) => {
-                     // Demo clips are plain files, so a failed load is a blip
-                     // (reset connection, server restart, tunnel hiccup), not a
-                     // clip still being cut: retry at once, then back off.
-                     // (Was a flat 5 s: one failed request = 5.4 s to first frame.)
                      const RETRY_DELAYS_MS = [300, 800, 1500, 3000, 6000];
                      const el = e.target;
                      const parent = el.parentNode;
@@ -2619,14 +2260,7 @@ export default function WallboardLeft() {
               <CycleCommentsPanel
                 lineId={lineId}
                 machineName="Final Inspection"
-                /* 2026-06-05 — Key = cycle_seq + the cycle's DATE to MATCH
-                   Fullscreen exactly AND stop a PAST day's cycle #N notes from
-                   showing on today's cycle #N (cycle_seq resets daily).  Both
-                   views build `cycle_<seq>_<YYYY-MM-DD>` from the same ts. */
                 partCode={`cycle_${videoCycle.cy.cycle_seq}` + (videoCycle.cy.ts ? `_${new Date(videoCycle.cy.ts).toISOString().slice(0, 10)}` : "")}
-                /* 2026-09-16 — the date alone is not enough: cycle_seq ALSO
-                   restarts every shift, so A-shift #10 and B-shift #10 of the
-                   SAME day collided.  Scope the thread to the cycle's shift. */
                 shift={videoCycle.cy.shift_name || shiftName}
                 border={border}
                 text={text}
@@ -2645,13 +2279,6 @@ export default function WallboardLeft() {
                 (cycles/comments, part_code-keyed) jo dono views me sync hota hai.
                 Yeh box ab sirf SUB machines ke liye (unka apna alag remark system). */}
             {!videoCycle.isMain && (() => {
-              // 2026-05-24 — Remark box for EVERY cycle (OK or NG).
-              // Only ONE input — for the specific machine whose cycle
-              // is being viewed.  NG cycles get a red box, OK cycles
-              // get a normal box.  Operator: "sabme remarks ka option
-              // de ok and ng me red kr dio bs comment box ko red and
-              // hr process pe apna apna remarks option bs only one
-              // machine jiski cycle h vo".
               const realPC = videoCycle.cy.part_code;
               const machineId = videoCycle.machine.id
                               || videoCycle.machine.sub_id
@@ -2684,26 +2311,6 @@ export default function WallboardLeft() {
     </div>
   );
 }
-
-// ═════════════════════════════════════════════════════════════════
-// CYCLE-COMMENT AUTOFILL  (2026-06-17)
-// Operator spec: "sirf suggestion aaye aur TAB press ho toh fill ho
-//   jaise keyboard mein autofill operate karta hai".
-//
-// PURE-FRONTEND, READ-ONLY.  No backend / collector / DB change — the
-// box only *suggests*; the supervisor still presses TAB (or clicks a
-// chip) to accept and SAVE/POST to persist, exactly as before.
-//
-// Suggestions are mined from the line's OWN comment history (the
-// existing /comments-history endpoint) and ranked with two signals,
-// grounded in the comment-history analysis:
-//   • FREQUENCY   — most-typed canonical phrases (Bin Change, Waiting
-//                   from previous process, Kanban put on bin, …).
-//   • PERIODICITY — bin-capacity reasons recur every ~N cycles; if a
-//                   reason is "due" for this cycle_seq it is boosted,
-//                   and a reason that just ran on the previous cycle
-//                   (sticky runs like "waiting") is boosted too.
-// ═════════════════════════════════════════════════════════════════
 
 // Normalise a comment to a grouping key (case/space/punct-insensitive).
 function _normComment(s) {
@@ -2841,11 +2448,6 @@ function GhostTextarea({
   placeholder, ...rest
 }) {
   const v = value == null ? "" : String(value);
-  // 2026-09-19 — ghost text OFF entirely (operator: "ghost text box me visually
-  // aa raha hai, hata do — only suggestion text chahiye, koi ghost comment
-  // nahi").  A grey past remark inside the box ("Video not running" on YCA)
-  // read as a comment that had appeared by itself.  Suggestions stay available
-  // as the chips under the box (SuggestChips); nothing is drawn in the box.
   const ghost = "";
   const _UNUSED_SUGGESTIONS = suggestions;   // still taken out of ...rest so it never reaches the <textarea>
   const ghostSuffix = ghost ? (v.trim() === "" ? ghost : ghost.slice(v.length)) : "";
@@ -2893,8 +2495,6 @@ function GhostTextarea({
   );
 }
 
-// SuggestChips — clickable top-3 suggestion pills shown under a compose
-// box (mouse alternative to TAB; also makes "suggestion aaye" visible).
 function SuggestChips({ suggestions = [], current = "", onPick, border, color }) {
   const list = (suggestions || []).filter(s => s && s.trim() !== (current || "").trim()).slice(0, 3);
   if (!list.length) return null;
@@ -2917,22 +2517,6 @@ function SuggestChips({ suggestions = [], current = "", onPick, border, color })
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// WbCycleRemarkPanel — single remark box for the specific machine
-// whose cycle is being viewed.  NG cycle = red box; OK cycle = blue.
-// Operator: "hr process pe apna apna remarks option bs only one
-// machine jiski cycle h vo".
-// ─────────────────────────────────────────────────────────────────
-// ── Voice dictation button for comment fields (2026-09-06) ──────────
-// Uses the browser Web Speech API (webkitSpeechRecognition) so the operator can
-// SPEAK a comment instead of typing it. Available in Chrome + the Android app
-// WebView (verified). Renders nothing where speech recognition is unsupported.
-// In the installed APK the WebView must GRANT the mic (MainActivity
-// onPermissionRequest + RECORD_AUDIO in the manifest) — added there too.
-// 2026-09-06 — LIVE dictation: while the mic is ON the text is written as you
-// speak (interim results) and it keeps listening until you turn it off
-// (continuous + auto-restart, since the Android WebView still auto-ends on a
-// pause). Controlled: `value` = current draft, `onChange(newText)` sets it.
 function MicDictateButton({ value = "", onChange, size = 34 }) {
   const [listening, setListening] = useState(false);
   const [err, setErr] = useState("");
@@ -2960,9 +2544,6 @@ function MicDictateButton({ value = "", onChange, size = 34 }) {
 
   const start = () => {
     setErr("");
-    // Web Speech API needs a SECURE context. http://<ip>:5656 (LAN / direct IP)
-    // is NOT secure, so the browser blocks the mic with a bare "not-allowed" —
-    // allowing the permission can't fix it. Tell the user the real reason.
     if (typeof window !== "undefined" && window.isSecureContext === false) {
       setErr("Mic needs HTTPS — open the app at mes.tbdi.in (or via localhost)");
       return;
@@ -3050,12 +2631,8 @@ function WbCycleRemarkPanel({
                    && sessionStorage.getItem("mes_token")) || "";
   const taRef = useRef(null);
 
-  // 2026-06-17 — autofill suggestions for THIS sub-machine's remarks
-  // (mined from mes_ng_process_remarks history; frequency-ranked).
   const suggestions = useCycleSuggest({ lineId, source: "ng_remark", machineId, partCode });
 
-  // 2026-06-17 — auto-focus the remark box the instant the video opens
-  // (same supervisor-speed fix as the main comment box).
   useEffect(() => {
     const t = setTimeout(() => {
       try { taRef.current?.focus({ preventScroll: true }); } catch {}
@@ -3140,9 +2717,6 @@ function WbCycleRemarkPanel({
           style={{
             flex: 1, padding: 8, borderRadius: 6,
             border: `1px solid ${isNg ? "rgba(239,68,68,0.5)" : border}`,
-            // 2026-05-24 — force WHITE text + readable placeholder on
-            // the dark wallboard background.  Operator: "text input ka
-            // colour black h white kr taki dikh jaye".
             background: "rgba(0,0,0,0.35)",
             color: "#ffffff",
             fontSize: 13, resize: "vertical", fontFamily: "inherit",
@@ -3191,9 +2765,6 @@ function CycleCommentsPanel({ lineId, partCode, machineName, border, text, textS
   const token = (typeof window !== "undefined"
                    && sessionStorage.getItem("mes_token")) || "";
   const taRef = useRef(null);
-  //  2026-09-28 — Leader attribution, same as the MANAGEMENT player.  This
-  //  screen had no leader field at all, so every remark written here saved
-  //  leader_name NULL and Comments History showed "—" in the Leader column.
   const [leaderOpts, setLeaderOpts] = useState([]);
   const [leaderName, setLeaderName] = useState("");
 
@@ -3216,14 +2787,8 @@ function CycleCommentsPanel({ lineId, partCode, machineName, border, text, textS
       .catch(() => { setLeaderOpts([]); setLeaderName(""); });
   }, [lineId, partCode, shift, token]);
 
-  // 2026-06-17 — autofill suggestions for this main-cycle comment box
-  // (mined from mes_cycle_comments history; frequency + periodicity).
   const suggestions = useCycleSuggest({ lineId, source: "cycle", partCode });
 
-  // 2026-06-17 — auto-focus the compose box the instant the video modal
-  // opens (or a different cycle dot is clicked) so the supervisor can type
-  // a comment immediately — no more hunting for + clicking the box each
-  // time.  preventScroll keeps the video in view while the cursor lands.
   useEffect(() => {
     const t = setTimeout(() => {
       try { taRef.current?.focus({ preventScroll: true }); } catch {}

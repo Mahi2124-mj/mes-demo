@@ -1,26 +1,9 @@
 /**
- * Always-visible progress + time for a <video>.
+ * Always-visible progress bar, time, play/pause, mute and fullscreen for a <video>
+ * (the browser's own control strip fades out during playback and cannot be pinned).
  *
- * 2026-08-22 — operator: "saari video me jo progress bar hai wo hide na ho,
- * hamesha unhide hi rahni chahiye taaki video ki progress aur time dikhta rahe".
- *
- * The browser's own control strip fades out a few seconds into playback and
- * there is no cross-browser way to pin it (Chromium exposes
- * ::-webkit-media-controls-panel, Firefox exposes nothing), so this replaces it
- * with a strip that never fades.
- *
- * 2026-08-22 (later) — `controls` was dropped from the players because the
- * native strip sat underneath this one and the operator saw two bars.  So this
- * component now owns play/pause, mute and fullscreen too; nothing the native
- * controls offered was lost.
- *
- * Reads straight off the element on a 200 ms tick rather than relying only on
- * `timeupdate`: the same component is used inside modals that mount the video
- * conditionally (and one that remounts it on every dot click), so polling means
- * there is no listener-attach race to get wrong. Events are wired too so the
- * bar still snaps immediately on seek/load.
- *
- * Click or drag anywhere on the bar to seek.
+ * Reads the element on a 200 ms tick as well as on events, because the video is
+ * mounted conditionally inside modals. Click or drag anywhere on the bar to seek.
  */
 import { useEffect, useRef, useState } from "react";
 

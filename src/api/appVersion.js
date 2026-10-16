@@ -6,15 +6,7 @@
 // (v1.0.1+); a v1.0.0 APK has no av → treated as outdated.
 
 // ── bump these when a new APK ships ──────────────────────────────────────
-// 2026-09-06 — the false-update LOOP is fixed. Background: the old shipped apk
-// was versionName 2.0.3 but its baked launch URL carried `?av=2.0.2` (whoever
-// built it bumped versionName but forgot the `av` in capacitor.config.json), so
-// every install kept reporting 2.0.2 and re-prompting forever. A CORRECTED apk
-// is now shipped: versionName 2.0.3, versionCode 8, and `av=2.0.3` baked in
-// (config synced in capacitor/android/.../assets/capacitor.config.json). Users
-// on the old broken build (av 2.0.2) get ONE prompt → install this fixed apk →
-// it launches with av=2.0.3 == LATEST → "Up to date" and the loop ends for
-// good. ALWAYS bump `av` in capacitor.config.json in lockstep with versionName.
+// Bump `av` in capacitor.config.json together with versionName.
 export const LATEST_APK = "2.0.8";
 // What the latest APK adds (shown in the update prompt).
 export const WHATS_NEW = [
@@ -29,10 +21,8 @@ function captureMarkers() {
     const p = new URLSearchParams(window.location.search);
     if (p.get("src")) sessionStorage.setItem("tbdi_src", p.get("src"));
     if (p.get("av"))  sessionStorage.setItem("tbdi_av",  p.get("av"));
-    // 2026-09-06 — the LAN build (65" interactive panel) carries &lan=1 and
-    // loads the app from the local server IP over HTTP. It must NEVER show the
-    // "update available" prompt: that apk points at mes.tbdi.in, so installing
-    // it would silently switch the panel OFF the LAN back to the internet.
+    // The LAN build (interactive panel) carries &lan=1 and never shows the update
+    // prompt: that APK points at the internet server.
     if (p.get("lan")) sessionStorage.setItem("tbdi_lan", p.get("lan"));
   } catch {}
 }

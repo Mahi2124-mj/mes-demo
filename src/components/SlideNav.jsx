@@ -3,16 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { versionStatus } from "../api/appVersion";
 
-// Static nav structure.  The Department Panel item is injected
-// dynamically below because its label depends on the logged-in
-// department user's department name.
-// Static nav structure.  The "Department" / "Maintenance" sections are
-// injected dynamically below depending on the logged-in user's role.
-//
-// "Production" gathers the Production-side flow: live dashboard + the
-// historical record browser + bulk Excel import/export.  The old
-// "Overview" + "Data" sections were merged into this single Production
-// section so the slide-nav reads as a clean role-grouped list.
+// Static nav structure. The "Department" / "Maintenance" sections are injected
+// below depending on the logged-in user's role.
 export const NAV_ITEMS = [
   {
     section: "Production",
@@ -83,8 +75,7 @@ export default function SlideNav({ hideTrigger = false, raise = false }) {
     return () => window.removeEventListener("tbdi:open-nav", openNav);
   }, []);
 
-  // Unread-notification count (badge on the Inbox item). 2026-09-15 — the page
-  // is now a notifications inbox, so the badge counts unread inbox items.
+  // Unread-notification count (badge on the Inbox item).
   useEffect(() => {
     setEscCount(0); return;   // demo: no inbox
     let alive = true;

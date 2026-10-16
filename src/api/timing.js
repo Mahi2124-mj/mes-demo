@@ -19,12 +19,8 @@ let flushTimer = null;
 const FLUSH_MS = 4000;      // batch window
 const MAX_QUEUE = 50;       // hard cap if the endpoint is unreachable
 
-// 2026-08-14 — who the samples belong to.  sendBeacon cannot set an
-// Authorization header, so every sample stored before today landed with
-// username NULL and per-user reporting was impossible.  The token rides in the
-// BODY instead (never a URL — that would put it in access logs).  Anonymous
-// still works: wall displays and kiosks have no token and are meant to be
-// counted anyway.
+// Who the samples belong to. sendBeacon cannot set an Authorization header, so the
+// token rides in the body (never the URL). Without a token samples are anonymous.
 let authToken = null;
 export function setTimingToken(t) { authToken = t || null; }
 
