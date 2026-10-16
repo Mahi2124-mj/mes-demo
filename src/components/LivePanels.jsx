@@ -72,16 +72,6 @@ function Lamp({ on, color = "#16a34a", size = 12 }) {
 
 const fmtTime = (iso) => (iso ? String(iso).slice(11, 19) : "—");
 
-// "0.1 s" → (raw * 0.1).toFixed(1) + " s"; anything else → raw value.
-function scaled(raw, unit) {
-  if (raw == null) return "—";
-  const m = /^\s*(0\.0*1)\s*(.*)$/.exec(String(unit || ""));
-  if (!m) return String(raw);
-  const f = parseFloat(m[1]);
-  const dec = m[1].split(".")[1].length;
-  return `${(raw * f).toFixed(dec)}${m[2] ? ` ${m[2]}` : ""}`;
-}
-
 const PLC_STATE = {
   connected:      { label: "Connected",      color: "#16a34a" },
   connecting:     { label: "Connecting…",    color: "#d97706" },
@@ -272,13 +262,6 @@ export function CollectorLive({ dark = false }) {
             )}
           </div>
         </div>
-        <div style={{ fontSize: 11, color: c.sub, marginTop: 6, lineHeight: 1.6 }}>
-          Deletes the live data first, then a demo PLC plays the cycles through the same SLMP path as the real
-          FX5U, on the OK/NG, counter, status and cycle time addresses saved on PLC Config — ideal CT{" "}
-          <b style={{ color: c.text }}>{ideal ?? "—"} s</b>, cycle times mixed around it
-          (e.g. {ideal ? `${(ideal * 0.9).toFixed(0)}, ${ideal.toFixed(0)}, ${(ideal * 1.4).toFixed(0)}` : "9, 10, 14"} s), so speed loss goes + and −;
-          2 cycles end NG. The CT distribution chart keeps the line's 30-day history.
-        </div>
         {(demoBusy || demo.state === "done" || demo.state === "stopped") && demo.total > 0 && (
           <div style={{ marginTop: 10 }}>
             <div style={{ height: 6, borderRadius: 99, background: c.deep, border: `1px solid ${c.border}`, overflow: "hidden" }}>
@@ -302,7 +285,6 @@ export function CollectorLive({ dark = false }) {
           <Chip label={st.label} color={st.color} />
           {plc.demo_plc && <Chip label="Demo PLC" color="#7c3aed" />}
           <span style={{ fontSize: 12, color: c.sub, fontFamily: "monospace" }}>{plc.plc_ip || "—"}:{plc.plc_port}</span>
-          <span style={{ fontSize: 11, color: c.sub }}>{plc.protocol} · count mode: {plc.count_mode}</span>
           <span style={{ marginLeft: "auto", fontSize: 11, color: c.sub }}>
             {plc.state === "connected"
               ? <>last read {fmtTime(plc.last_poll)} · {plc.poll_ms} ms</>
@@ -326,54 +308,30 @@ export function CollectorLive({ dark = false }) {
         </div>
       </div>
 
-      {/* Signals + registers */}
-      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-        <div style={card}>
-          <h4 style={head}>Cycle signals</h4>
-          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
-            {signal("OK signal", v.ok_signal, "#16a34a")}
-            {signal("NG signal", v.ng_signal, "#dc2626")}
-            {word("Status", v.status, v.status?.name ? ` · ${v.status.name}` : "")}
-            {word("OK count", v.ok_count)}
-            {word("NG count", v.ng_count)}
-          </div>
-          <h4 style={{ ...head, marginTop: 16 }}>Digital inputs</h4>
-          {(plc.inputs || []).length === 0 ? (
-            <div style={{ fontSize: 12, color: c.sub }}>No digital inputs configured.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
-              {plc.inputs.map(x => (
-                <div key={x.address} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: c.text, minWidth: 0 }}>
-                  <Lamp on={!!x.value} size={10} color="#22c55e" />
-                  <span style={{ fontFamily: "monospace", color: c.sub, width: 30 }}>{x.address}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.signal}</span>
-                </div>
-              ))}
-            </div>
-          )}
+      {/* Signals */}
+      <div style={card}>
+        <h4 style={head}>Cycle signals</h4>
+        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
+          {signal("OK signal", v.ok_signal, "#16a34a")}
+          {signal("NG signal", v.ng_signal, "#dc2626")}
+          {word("Status", v.status, v.status?.name ? ` · ${v.status.name}` : "")}
+          {word("OK count", v.ok_count)}
+          {word("NG count", v.ng_count)}
         </div>
-
-        <div style={card}>
-          <h4 style={head}>Data registers</h4>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr>{["Register", "Content", "Raw", "Value"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {(plc.registers || []).map((r, i) => (
-                  <tr key={r.register} style={{ background: i % 2 ? c.rowAlt : "transparent" }}>
-                    <td style={{ ...td, fontFamily: "monospace", color: "#7c3aed", fontWeight: 700 }}>{r.register}</td>
-                    <td style={{ ...td, whiteSpace: "normal" }}>{r.content}</td>
-                    <td style={{ ...td, fontFamily: "monospace" }}>{r.value ?? "—"}</td>
-                    <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{scaled(r.value, r.unit)}</td>
-                  </tr>
-                ))}
-                {(plc.registers || []).length === 0 && (
-                  <tr><td colSpan={4} style={{ ...td, color: c.sub }}>No data registers configured.</td></tr>
-                )}
-              </tbody>
-            </table>
+        <h4 style={{ ...head, marginTop: 16 }}>Digital inputs</h4>
+        {(plc.inputs || []).length === 0 ? (
+          <div style={{ fontSize: 12, color: c.sub }}>No digital inputs configured.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+            {plc.inputs.map(x => (
+              <div key={x.address} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: c.text, minWidth: 0 }}>
+                <Lamp on={!!x.value} size={10} color="#22c55e" />
+                <span style={{ fontFamily: "monospace", color: c.sub, width: 30 }}>{x.address}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.signal}</span>
+              </div>
+            ))}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Last cycles */}
@@ -390,8 +348,6 @@ export function CollectorLive({ dark = false }) {
           return (
             <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: c.deep, border: `1px solid ${why ? "rgba(217,119,6,.4)" : c.border}`,
                           fontSize: 11, color: c.sub, lineHeight: 1.7 }}>
-              <div>Clips folder: <b style={{ color: c.text, fontFamily: "monospace", wordBreak: "break-all" }}>{cam.clips_dir}</b> (cycle_&lt;#&gt;.mp4)
-                {" "}· <a href="/cycle-videos" style={{ color: "#2563eb", fontWeight: 700 }}>Cycle Videos page: video length vs cycle time →</a></div>
               <div>
                 Saved <b style={{ color: c.text }}>{cam.clips_cut}</b>
                 {cam.clips_failed > 0 && <> · failed <b style={{ color: "#dc2626" }}>{cam.clips_failed}</b></>}
@@ -446,10 +402,6 @@ export function CollectorLive({ dark = false }) {
               )}
             </tbody>
           </table>
-        </div>
-        <div style={{ marginTop: 8, fontSize: 10, color: c.mut }}>
-          CT comes from the PLC's cycle time register ({plc.ct_register || "not set"}) when it has a value, else the time since the previous signal.
-          * longer than the max allowed cycle time (a stop): counted at the max.
         </div>
       </div>
     </div>
