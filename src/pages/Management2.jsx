@@ -3590,9 +3590,10 @@ export default function Management2() {
           //   row 1 header · row 2 KPI band · row 3 CT graph
           //   row 4 lower chart band · row 5 timeline · row 6 hourly
           // Demo page 2: row 3 = CT graph | CT Distribution (60/40),
-          // row 4 hourly, row 5 timeline, row 6 Documents (2×2 A3 sheets).
-          // 1.2fr / 2.2fr keeps the CT graph at the height it had before.
-          ? `minmax(50px, auto) 205px 1.28fr auto auto 2.2fr`
+          // row 4 hourly, row 5 timeline, row 6 Documents (Track Record upright
+          // + 2×2 landscape sheets; its height follows the width, the CT row
+          // takes the rest).
+          ? `minmax(50px, auto) 205px 1fr auto auto auto`
           : "minmax(50px, auto) 1fr auto auto",
         gap:6, padding:6,
         paddingTop: gapShift ? 40 : 6,

@@ -104,8 +104,8 @@ The server PC must be on the machine network (192.168.30.x).
 
 ## Documents (MANAGEMENT-2)
 The line's sheets open in a popup: 📄 DOCUMENTS button in the MANAGEMENT-2 header (any layout), or
-tap a sheet in the Documents card (portrait layout: Track Record upright on the left, the
-landscape sheets stacked on the right).
+tap a sheet in the Documents card (portrait layout: Track Record upright on the left, the four
+landscape sheets in a 2×2 grid on the right).
 - Track Record Sheet (YNC / YHB / YRA / YSD), 4M Change Control Sheet (4 sheets), Operator
   Visualization Sheet, Annual Safety Chart, Defect Recording Sheet.
 - Popup: document tabs, sheet tabs, ‹ › or ← → to page through every sheet, click the sheet for 100 %

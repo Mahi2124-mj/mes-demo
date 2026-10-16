@@ -2,8 +2,8 @@
 // Visualization, Safety Chart, Defect Record), rendered from the Excel files to PNG pages in
 // public/docs/ (one image per sheet, plus a print-ready PDF per document).
 //
-//   <DocSheetsRow>  card (portrait layout): Track Record upright on the left, the landscape sheets stacked
-//                   beside it; tap opens the viewer
+//   <DocSheetsRow>  card (portrait layout): Track Record upright on the left, the four landscape sheets
+//                   in a 2 x 2 grid beside it; tap opens the viewer
 //   <DocViewer>     full-screen popup: document tabs, sheet tabs, ‹ › paging, Fit / 100 % zoom, PDF,
 //                   ✕ on the sheet's top-right corner
 import { useEffect, useRef, useState } from "react";
@@ -138,7 +138,7 @@ export function DocViewer({ start = 0, onClose }) {
   ), document.body);
 }
 
-// ─── Card (portrait layout): Track Record upright on the left, landscape sheets beside it ───
+// ─── Card (portrait layout): Track Record upright on the left, 2 x 2 landscape sheets beside it ───
 export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
   const [open, setOpen] = useState(null);
   const tile = (d, i, big) => (
@@ -174,15 +174,13 @@ export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
                      color: textMut, fontSize: 10, fontWeight: 800, padding: "2px 8px" }}>📄 Open all</button>
         </span>
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, padding: 8 }}>
-        {/* width follows the height: an upright A4-like sheet (1600 x 1872) plus its label row */}
-        <div style={{ height: "100%", aspectRatio: "1600 / 1900", maxWidth: "66%", minWidth: 0, flexShrink: 0 }}>
-          {tile(upright, 0, true)}
-        </div>
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "grid", gap: 8,
-                      gridTemplateRows: `repeat(${rest.length}, minmax(0, 1fr))` }}>
-          {rest.map((d, k) => tile(d, k + 1))}
-        </div>
+      {/* Height follows the width (aspect-ratio): the upright sheet (1600 x 1872) is as tall as two rows of
+          landscape sheets (~1.48 : 1), so 1.24fr : 1fr : 1fr columns fill the cells without empty bands. */}
+      <div style={{ aspectRatio: "2.15 / 1", display: "grid", gap: 10, padding: 8,
+                    gridTemplateColumns: "minmax(0, 1.24fr) minmax(0, 1fr) minmax(0, 1fr)",
+                    gridTemplateRows: "repeat(2, minmax(0, 1fr))" }}>
+        <div style={{ gridRow: "1 / span 2", minWidth: 0, minHeight: 0 }}>{tile(upright, 0, true)}</div>
+        {rest.map((d, k) => tile(d, k + 1))}
       </div>
       {open != null && <DocViewer start={open} onClose={() => setOpen(null)} />}
     </div>
