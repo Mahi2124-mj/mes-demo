@@ -1133,6 +1133,23 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
 
+def lan_ips():
+    """This PC's IPv4 addresses other than loopback (for the LAN links printed at start)."""
+    import socket
+    ips = set()
+    try:
+        ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        pass
+    try:                                       # the address used for outgoing traffic (no packet is sent)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.168.30.10", 9))
+            ips.add(s.getsockname()[0])
+    except OSError:
+        pass
+    return sorted(ip for ip in ips if not ip.startswith("127."))
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 128
@@ -1151,6 +1168,9 @@ if __name__ == "__main__":
     m, c = machine_cfg(), camera_cfg()
     print(f"Live data (MANAGEMENT-2): PLC {m.get('plc_ip')}:{m.get('plc_port')}, camera {c.get('ip')}, "
           f"ffmpeg: {CAMERA.ffmpeg or 'NOT FOUND (no clips, snapshot preview only)'}", flush=True)
+    # Pages and API share one origin, so other PCs need no CORS, only a reachable port (firewall).
+    for ip in lan_ips():
+        print(f"Open from another PC on the LAN: http://{ip}:{PORT}/YCA-SS/MANAGEMENT-2", flush=True)
     atexit.register(CAMERA.stop)              # never leave ffmpeg running after the server
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # stop.sh: exit through atexit
     COLLECTOR.start()

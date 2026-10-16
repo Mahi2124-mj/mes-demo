@@ -41,6 +41,10 @@ Windows (PowerShell, in the repo folder):
     .\start.bat      # first run: npm install + ffmpeg download into .\ffmpeg; then build + python server.py
                       # stop with Ctrl+C
 
+Other PCs on the LAN open `http://<this PC's IP>:5000/...` (the server prints the links at start).
+No CORS setting is involved: pages and API come from the same server. Windows Firewall must allow
+TCP 5000 — `start.bat` adds that rule once when run as Administrator.
+
 Rebuild after a frontend change: `npx vite build`, then reload the page.
 Needs Python 3.8+ (standard library only) and, for live cycle clips, **ffmpeg**
 (Windows: unzip a build into the repo so that `ffmpeg\bin\ffmpeg.exe` exists — no PATH needed:
