@@ -104,11 +104,12 @@ The server PC must be on the machine network (192.168.30.x).
 
 ## Documents (MANAGEMENT-2)
 The line's sheets open in a popup: 📄 DOCUMENTS button in the MANAGEMENT-2 header (any layout), or
-tap a thumbnail in the Documents card (portrait layout).
+tap a sheet in the Documents card (portrait layout: Track Record upright on the left, the
+landscape sheets stacked on the right).
 - Track Record Sheet (YNC / YHB / YRA / YSD), 4M Change Control Sheet (4 sheets), Operator
   Visualization Sheet, Annual Safety Chart, Defect Recording Sheet.
 - Popup: document tabs, sheet tabs, ‹ › or ← → to page through every sheet, click the sheet for 100 %
-  zoom, Esc closes, "⬇ PDF / Print" opens the print-ready PDF.
+  zoom, the red ✕ on the sheet's top-right corner (or Esc) closes, "⬇ PDF / Print" opens the PDF.
 - Files: `public/docs/<doc>-<n>.png` (one image per sheet), `<doc>-<n>.thumb.png`, `<doc>.pdf`,
   made from the Excel files. To change a sheet, replace its PNG/PDF with the same name and rebuild.
 

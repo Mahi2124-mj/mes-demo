@@ -2,9 +2,11 @@
 // Visualization, Safety Chart, Defect Record), rendered from the Excel files to PNG pages in
 // public/docs/ (one image per sheet, plus a print-ready PDF per document).
 //
-//   <DocSheetsRow>  card with one thumbnail per document (portrait layout); tap opens the viewer
-//   <DocViewer>     full-screen popup: document tabs, sheet tabs, ‹ › paging, Fit / 100 % zoom, PDF
-import { useEffect, useState } from "react";
+//   <DocSheetsRow>  card (portrait layout): Track Record upright on the left, the landscape sheets stacked
+//                   beside it; tap opens the viewer
+//   <DocViewer>     full-screen popup: document tabs, sheet tabs, ‹ › paging, Fit / 100 % zoom, PDF,
+//                   ✕ on the sheet's top-right corner
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 const page = (key, n, label, w, h) => ({ src: `/docs/${key}-${n}.png`, thumb: `/docs/${key}-${n}.thumb.png`, label, w, h });
@@ -27,6 +29,8 @@ export function DocViewer({ start = 0, onClose }) {
   const [di, setDi] = useState(start);   // document index
   const [pi, setPi] = useState(0);       // page index inside the document
   const [zoom, setZoom] = useState(false);
+  const boxRef = useRef(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });   // room for the sheet (inside the scroll area)
   const doc = DOCS[di];
   const pg = doc.pages[Math.min(pi, doc.pages.length - 1)];
 
@@ -50,6 +54,12 @@ export function DocViewer({ start = 0, onClose }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+  useEffect(() => {
+    const el = boxRef.current;
+    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   useEffect(() => {                    // warm the next pages so paging is instant
     for (const d of [DOCS[di], DOCS[(di + 1) % DOCS.length]]) for (const p of d.pages) { const im = new Image(); im.src = p.src; }
   }, [di]);
@@ -58,6 +68,15 @@ export function DocViewer({ start = 0, onClose }) {
                 color: "#e2e8f0", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" };
   const tab = (active) => ({ ...btn, height: 30, background: active ? "#2563eb" : "#0f172a",
                              borderColor: active ? "#2563eb" : "#334155", color: active ? "#fff" : "#cbd5e1" });
+  // Where the sheet sits in the box: fitted and centred, or 100 % (scrolls; the ✕ stays on its visible corner).
+  const fit = Math.min(box.w / pg.w, box.h / pg.h);
+  const shown = zoom ? { w: pg.w, h: pg.h } : { w: pg.w * fit, h: pg.h * fit };
+  const vis = { x: Math.max(0, (box.w - shown.w) / 2), y: zoom ? 0 : Math.max(0, (box.h - shown.h) / 2),
+                w: Math.min(shown.w, box.w) };
+  const PAD = 18, X = 34;               // PAD: room around the sheet for the ✕ to sit half outside its corner
+  const clipped = zoom && shown.w >= box.w;          // zoomed past the box: keep the ✕ inside, clear of the scrollbar
+  const close = clipped ? { left: PAD + box.w - X - 6, top: PAD + 6 }
+                        : { left: PAD + Math.min(vis.x + vis.w - X / 2, box.w + PAD - X), top: PAD + vis.y - X / 2 };
   const narrow = window.innerWidth < 640;            // phone: ‹ › float over the sheet instead of beside it
   const side = (edge) => ({ width: 46, height: 46, borderRadius: 99, border: "1px solid #475569", background: "rgba(15,23,42,.85)",
                  color: "#e2e8f0", fontSize: 24, fontWeight: 900, cursor: "pointer", flexShrink: 0,
@@ -80,7 +99,6 @@ export function DocViewer({ start = 0, onClose }) {
         </button>
         <a href={doc.pdf} target="_blank" rel="noopener noreferrer" style={{ ...btn, display: "inline-flex", alignItems: "center", textDecoration: "none" }}
            title="Open the PDF to print or download">⬇ PDF / Print</a>
-        <button type="button" style={{ ...btn, width: 34, padding: 0, fontSize: 15 }} onClick={onClose} title="Close (Esc)">✕</button>
       </div>
 
       {/* Title + sheet tabs */}
@@ -98,14 +116,21 @@ export function DocViewer({ start = 0, onClose }) {
       {/* Page */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", gap: 10, padding: "0 10px 12px", position: "relative" }}>
         <button type="button" style={side("left")} title="Previous" onClick={e => { e.stopPropagation(); step(-1); }}>‹</button>
-        <div onClick={e => e.stopPropagation()}
-          style={{ flex: 1, height: "100%", minWidth: 0, overflow: zoom ? "auto" : "hidden", display: "flex",
-                   alignItems: zoom ? "flex-start" : "center", justifyContent: zoom ? "flex-start" : "center", borderRadius: 8 }}>
-          <img key={pg.src} src={pg.src} alt={`${doc.label} — ${pg.label}`} onClick={() => setZoom(z => !z)}
-            style={zoom
-              ? { width: pg.w, maxWidth: "none", height: "auto", cursor: "zoom-out", background: "#fff", display: "block" }
-              : { maxWidth: "100%", maxHeight: "100%", objectFit: "contain", cursor: "zoom-in", background: "#fff",
-                  boxShadow: "0 8px 40px rgba(0,0,0,.6)", display: "block" }} />
+        <div style={{ flex: 1, height: "100%", minWidth: 0, position: "relative", padding: `${PAD}px ${PAD}px 0` }}>
+          <div ref={boxRef} onClick={e => e.stopPropagation()}
+            style={{ height: "100%", overflow: zoom ? "auto" : "hidden", display: "flex", alignItems: "flex-start" }}>
+            <img key={pg.src} src={pg.src} alt={`${doc.label} — ${pg.label}`} onClick={() => setZoom(z => !z)}
+              style={{ width: shown.w || undefined, height: shown.h || undefined, maxWidth: "none", flexShrink: 0,
+                       margin: zoom ? "0 auto" : `${vis.y}px auto 0`, cursor: zoom ? "zoom-out" : "zoom-in",
+                       background: "#fff", boxShadow: zoom ? "none" : "0 8px 40px rgba(0,0,0,.6)", display: "block",
+                       visibility: box.w ? "visible" : "hidden" }} />
+          </div>
+          {box.w > 0 && (
+            <button type="button" onClick={e => { e.stopPropagation(); onClose(); }} title="Close (Esc)" aria-label="Close"
+              style={{ position: "absolute", left: close.left, top: close.top, width: X, height: X, borderRadius: 99,
+                       border: "2px solid #fff", background: "#dc2626", color: "#fff", fontSize: 16, fontWeight: 900,
+                       lineHeight: 1, cursor: "pointer", boxShadow: "0 2px 10px rgba(0,0,0,.5)", zIndex: 2 }}>✕</button>
+          )}
         </div>
         <button type="button" style={side("right")} title="Next" onClick={e => { e.stopPropagation(); step(1); }}>›</button>
       </div>
@@ -113,44 +138,51 @@ export function DocViewer({ start = 0, onClose }) {
   ), document.body);
 }
 
-// ─── Card with one thumbnail per document (portrait layout) ───
+// ─── Card (portrait layout): Track Record upright on the left, landscape sheets beside it ───
 export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
   const [open, setOpen] = useState(null);
+  const tile = (d, i, big) => (
+    <button key={d.key} type="button" onClick={() => setOpen(i)} title={`Open ${d.label}`}
+      style={{ cursor: "pointer", minWidth: 0, minHeight: 0, width: "100%", height: "100%", display: "flex",
+               flexDirection: "column", padding: 0, border: "none", background: "transparent", textAlign: "left" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, width: "100%", height: 16, flexShrink: 0 }}>
+        <span style={{ fontSize: 10, fontWeight: 800, color: textMut, letterSpacing: ".06em", textTransform: "uppercase",
+                       whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.short}</span>
+        {d.pages.length > 1 && (
+          <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, color: "#fff", background: "#2563eb",
+                         borderRadius: 99, padding: "1px 6px", flexShrink: 0 }}>{d.pages.length} sheets</span>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, width: "100%", display: "flex", alignItems: "flex-start", justifyContent: "flex-start",
+                    overflow: "hidden" }}>
+        {/* the big tile is shown near full size, so it uses the page image instead of the thumbnail */}
+        <img src={big ? d.pages[0].src : d.pages[0].thumb} alt={d.label} loading="lazy"
+          style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", background: "#fff",
+                   boxShadow: "0 2px 10px rgba(0,0,0,.35)", display: "block" }} />
+      </div>
+    </button>
+  );
+  const [upright, ...rest] = DOCS;
   return (
     <div style={{ ...card(), display: "flex", flexDirection: "column", minHeight: 0, ...style }}>
       <div style={hdr({ padding: "4px 10px" })}>
         <span style={lbl9}>Documents</span>
-        <span style={{ fontSize: 10, color: textMut, fontWeight: 700 }}>Tap a sheet to open</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 10, color: textMut, fontWeight: 700 }}>Tap a sheet to open</span>
+          <button type="button" onClick={() => setOpen(0)}
+            style={{ cursor: "pointer", border: "1px solid #475569", borderRadius: 6, background: "transparent",
+                     color: textMut, fontSize: 10, fontWeight: 800, padding: "2px 8px" }}>📄 Open all</button>
+        </span>
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                    gridTemplateRows: "repeat(2, minmax(0, 1fr))", gap: 8, padding: 8 }}>
-        {DOCS.map((d, i) => (
-          <button key={d.key} type="button" onClick={() => setOpen(i)}
-            style={{ cursor: "pointer", minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", padding: 0,
-                     border: "none", background: "transparent", textAlign: "left" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, width: "100%" }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: textMut, letterSpacing: ".06em", textTransform: "uppercase",
-                             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.short}</span>
-              {d.pages.length > 1 && (
-                <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, color: "#fff", background: "#2563eb",
-                               borderRadius: 99, padding: "1px 6px", flexShrink: 0 }}>{d.pages.length} sheets</span>
-              )}
-            </div>
-            <div style={{ flex: 1, minHeight: 0, width: "100%", display: "flex", alignItems: "flex-start", justifyContent: "center",
-                          overflow: "hidden" }}>
-              <img src={d.pages[0].thumb} alt={d.label} loading="lazy"
-                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", background: "#fff",
-                         boxShadow: "0 2px 10px rgba(0,0,0,.35)", display: "block" }} />
-            </div>
-          </button>
-        ))}
-        <button type="button" onClick={() => setOpen(0)}
-          style={{ cursor: "pointer", border: "2px dashed #475569", borderRadius: 10, background: "transparent",
-                   color: textMut, fontSize: 12, fontWeight: 800, display: "flex", flexDirection: "column",
-                   alignItems: "center", justifyContent: "center", gap: 4 }}>
-          <span style={{ fontSize: 26 }}>📄</span>
-          Open all documents
-        </button>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, padding: 8 }}>
+        {/* width follows the height: an upright A4-like sheet (1600 x 1872) plus its label row */}
+        <div style={{ height: "100%", aspectRatio: "1600 / 1900", maxWidth: "66%", minWidth: 0, flexShrink: 0 }}>
+          {tile(upright, 0, true)}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "grid", gap: 8,
+                      gridTemplateRows: `repeat(${rest.length}, minmax(0, 1fr))` }}>
+          {rest.map((d, k) => tile(d, k + 1))}
+        </div>
       </div>
       {open != null && <DocViewer start={open} onClose={() => setOpen(null)} />}
     </div>
