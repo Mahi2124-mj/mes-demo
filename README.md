@@ -102,6 +102,16 @@ The server PC must be on the machine network (192.168.30.x).
 - Without ffmpeg: the preview falls back to the camera's HTTP snapshot (`/ISAPI/.../picture` or `/cgi-bin/camera`), no clips.
 - Live preview: Camera page → Preview → Live, or the 📷 CAMERA button on MANAGEMENT-2.
 
+## Documents (MANAGEMENT-2)
+The line's sheets open in a popup: 📄 DOCUMENTS button in the MANAGEMENT-2 header (any layout), or
+tap a thumbnail in the Documents card (portrait layout).
+- Track Record Sheet (YNC / YHB / YRA / YSD), 4M Change Control Sheet (4 sheets), Operator
+  Visualization Sheet, Annual Safety Chart, Defect Recording Sheet.
+- Popup: document tabs, sheet tabs, ‹ › or ← → to page through every sheet, click the sheet for 100 %
+  zoom, Esc closes, "⬇ PDF / Print" opens the print-ready PDF.
+- Files: `public/docs/<doc>-<n>.png` (one image per sheet), `<doc>-<n>.thumb.png`, `<doc>.pdf`,
+  made from the Excel files. To change a sheet, replace its PNG/PDF with the same name and rebuild.
+
 ## Management dashboard (recorded)
 Replays the same recorded shift: the page clock is pinned to 2026-10-08 16:49 (shift A), so plan,
 timeline and hourly slots match the recorded Final Inspection cycles (realtime is computed from them).

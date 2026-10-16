@@ -8,7 +8,7 @@ import { startTimer } from "../api/timing";
 import axios from "axios";
 import VideoProgressBar from "../components/VideoProgressBar";
 import SlideNav from "../components/SlideNav";
-import DocSheetsRow from "../components/DocSheets";
+import DocSheetsRow, { DocViewer } from "../components/DocSheets";
 import { CameraLive, CollectorLive, LiveModal } from "../components/LivePanels";
 
 // 2026-06-01 — a timeout (server answers /realtime in ~13ms, so this NEVER
@@ -942,6 +942,7 @@ export default function Management2() {
   const [notProvisioned, setNotProvisioned] = useState(false);
   const [now,  setNow]       = useState(demoNow());
   const [liveView, setLiveView] = useState(null);   // "camera" | "collector" popup
+  const [docsOpen, setDocsOpen] = useState(false);  // documents popup
 
   const chartRef    = useRef(null);
   const chartInst   = useRef(null);
@@ -3968,6 +3969,10 @@ export default function Management2() {
               style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
               📡 COLLECTOR
             </button>
+            <button onClick={()=>setDocsOpen(true)} title="Line documents: Track Record, 4M Change, Operator Visualization, Safety Chart, Defect Record"
+              style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
+              📄 DOCUMENTS
+            </button>
             <button onClick={()=>setDark(d=>!d)} style={{padding:"4px 10px",borderRadius:6,
               border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
               {D?"☀ LIGHT":"🌙 DARK"}
@@ -4628,17 +4633,10 @@ export default function Management2() {
             </div>
             )}
 
-          {/* ── Documents: 4M Change / Quality / Safety / blank (A4 portrait) ── */}
+          {/* ── Documents: Track Record / 4M Change / Operator Visualization / Safety / Defect Record ── */}
           {isPortrait && (
             <DocSheetsRow card={card} hdr={hdr} lbl9={lbl9} textMut={textMut}
-                          style={{ gridColumn: "1 / -1", gridRow: 6 }}
-                          info={[
-                            ["Line", line?.line_name],
-                            ["Station", "Final Inspection"],
-                            ["Model", String(rt?.current_model_name || "").replace(/^TYPE-SERIES:\s*/i, "")],
-                            ["Date", (rt?.record_date || "").split("-").reverse().join("-")],
-                            ["Shift", rt?.shift_name],
-                          ]} />
+                          style={{ gridColumn: "1 / -1", gridRow: 6 }} />
           )}
 
           {/* Landscape chart card — original toggle UI.  Hidden in
@@ -6163,6 +6161,7 @@ export default function Management2() {
       <LiveModal open={liveView === "collector"} title="Collector data — PLC live" dark={D} wide onClose={() => setLiveView(null)}>
         <CollectorLive dark={D} />
       </LiveModal>
+      {docsOpen && <DocViewer start={0} onClose={() => setDocsOpen(false)} />}
 
       {ngListModal && (
         <NgListModal
