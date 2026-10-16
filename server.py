@@ -25,6 +25,7 @@ import json
 import os
 import random
 import signal
+import socket
 import sys
 import threading
 import time
@@ -1135,7 +1136,6 @@ class Handler(BaseHTTPRequestHandler):
 
 def lan_ips():
     """This PC's IPv4 addresses other than loopback (for the LAN links printed at start)."""
-    import socket
     ips = set()
     try:
         ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
@@ -1153,6 +1153,10 @@ def lan_ips():
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 128
+    # On Windows SO_REUSEADDR lets a second copy of the server bind the same port and split the
+    # traffic (and both copies would read the PLC and record the camera). Without it the second
+    # copy's bind fails, and a restart after Ctrl+C still works at once (unlike SO_EXCLUSIVEADDRUSE).
+    allow_reuse_address = os.name != "nt"
 
     def handle_error(self, request, client_address):
         # A viewer closing a clip drops its connection mid-transfer or while idle;
@@ -1163,6 +1167,13 @@ class Server(ThreadingHTTPServer):
 
 
 if __name__ == "__main__":
+    try:
+        httpd = Server(("0.0.0.0", PORT), Handler)
+    except OSError as e:
+        print(f"Port {PORT} is already in use ({e}).\n"
+              f"The demo server is probably already running in another window: close that one first,\n"
+              f"or stop it with:  netstat -ano | findstr :{PORT}   then   taskkill /PID <pid> /T /F", flush=True)
+        sys.exit(1)
     print(f"MES demo clone on http://0.0.0.0:{PORT}  (recorded data: {RECORD_DATE} shift {SHIFT}, "
           f"{len(CYCLES['machines'])} machines)", flush=True)
     m, c = machine_cfg(), camera_cfg()
@@ -1176,6 +1187,6 @@ if __name__ == "__main__":
     COLLECTOR.start()
     CAMERA.start()
     try:
-        Server(("0.0.0.0", PORT), Handler).serve_forever()
+        httpd.serve_forever()
     except KeyboardInterrupt:
         pass
