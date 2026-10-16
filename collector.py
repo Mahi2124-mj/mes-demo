@@ -216,11 +216,13 @@ class Collector:
         self.status_key = None               # (record_date, shift) the status was last logged for
         self.last_cycle_at = None            # datetime of the last OK/NG signal
         self.last_cycle_key = None
+        self.connected_at = None             # when the current PLC connection came up
         self.override = None                 # PLC settings used instead of the saved ones (demo PLC)
 
     # ----- public -----
     def start(self):
         self._log_downtime_since_heartbeat()
+        self._resume_last_cycle()
         threading.Thread(target=self._run, name="collector", daemon=True).start()
         threading.Thread(target=self._heartbeat, name="collector-hb", daemon=True).start()
 
@@ -282,6 +284,17 @@ class Collector:
             except OSError:
                 pass
 
+    def _resume_last_cycle(self):
+        """After a restart the next cycle is still timed from the last stored signal of this shift
+        (the time the server was down is logged as PLC OFFLINE and left out of the cycle time)."""
+        rd, sh, _ = self.clock.at(_now())
+        cyc = self.store.cycles(rd, sh)
+        if cyc:
+            try:
+                self.last_cycle_at, self.last_cycle_key = dt.datetime.fromisoformat(cyc[-1]["ts"]), (rd, sh)
+            except (KeyError, ValueError):
+                pass
+
     def _log_downtime_since_heartbeat(self):
         """The server was down: close the open status at the last heartbeat with PLC OFFLINE."""
         hb = self.store.state.get("heartbeat")
@@ -315,7 +328,8 @@ class Collector:
             self._set(state="connecting", plc=f"{ip}:{cfg.get('plc_port') or 5000}")
             try:
                 client.connect()
-                self._set(state="connected", last_error=None, connected_since=_now().isoformat(timespec="seconds"))
+                self.connected_at = _now()
+                self._set(state="connected", last_error=None, connected_since=self.connected_at.isoformat(timespec="seconds"))
                 backoff = 1.0
                 self._poll_loop(client, cfg, version)
             except Exception as e:  # noqa: BLE001 - bad config or PLC trouble: report it and retry, never stop
@@ -467,26 +481,69 @@ class Collector:
             return None
         return round(ct, 2) if ct > 0 else None
 
+    def _not_working(self, rd, sh, t0, t1):
+        """Seconds of [t0, t1] that are no cycle time: scheduled breaks, PLC OFFLINE and loss statuses
+        (breakdown, material, andon calls ...). Overlaps are counted once."""
+        spans = []
+        line = self.get_line_cfg()
+        for b in line.get("breaks") or []:
+            if sh not in str(b.get("applies_to_shifts") or sh).replace(" ", "").split(","):
+                continue
+            try:
+                b0 = self.clock.at_time(rd, sh, b["start_time"])
+                b1 = self.clock.at_time(rd, sh, b["end_time"])
+            except (KeyError, ValueError):
+                continue
+            if b1 <= b0:
+                b1 += dt.timedelta(days=1)
+            spans.append((b0, b1))
+        losses = {name for name, lt in self._status_map().values() if lt}
+        log = sorted(self.store.status_log(rd, sh), key=lambda e: e.get("ts", 0))
+        for i, e in enumerate(log):
+            if e.get("status") != OFFLINE and e.get("status") not in losses:
+                continue
+            s0 = dt.datetime.fromtimestamp(e["ts"] / 1000)
+            s1 = dt.datetime.fromtimestamp(log[i + 1]["ts"] / 1000) if i + 1 < len(log) else t1
+            spans.append((s0, s1))
+        total, end = 0.0, t0
+        for a, b in sorted((max(a, t0), min(b, t1)) for a, b in spans):
+            if b <= a:
+                continue
+            a = max(a, end)
+            if b > a:
+                total += (b - a).total_seconds()
+                end = b
+        return total
+
     def _cycle(self, cfg, is_ng, client=None):
         now = _now()
         rd, sh, _ = self.clock.at(now)
-        max_ct = float(cfg.get("max_allowed_cycle") or 40.0)
-        gap = None
         if self.last_cycle_at is not None and self.last_cycle_key == (rd, sh):
-            gap = (now - self.last_cycle_at).total_seconds()
+            start, source = self.last_cycle_at, "measured"
+        else:
+            # First cycle of the shift: from the shift start (+ start-up delay), or from when the
+            # collector got the PLC, whichever is later.
+            row = self.clock.shift_row(sh) or {}
+            start = now
+            if row:
+                t0, _ = self.clock.bounds(dt.date.fromisoformat(rd), row)
+                start = t0 + dt.timedelta(minutes=float(row.get("startup_delay_min") or 0))
+            if self.connected_at and self.connected_at > start:
+                start = self.connected_at
+            start, source = min(start, now), "first"
+        gap = (now - start).total_seconds()
+        excluded = self._not_working(rd, sh, start, now)
         plc_ct = self._plc_ct(client, cfg)
         if plc_ct is not None:
-            ct, capped, source = min(plc_ct, max_ct), plc_ct > max_ct, "plc"
+            ct, source = plc_ct, "plc"
         else:
-            # Time since the previous signal.  First cycle of a shift, or after a stop: the real
-            # cycle time is unknown — count it at the max allowed cycle time, not the whole stop.
-            capped = gap is None or gap > max_ct
-            ct, source = (max_ct if capped else round(gap, 2)), "measured"
+            # Time since the previous OK/NG signal, without breaks, PLC OFFLINE and loss time.
+            ct = round(max(0.0, gap - excluded), 2)
         self.last_cycle_at, self.last_cycle_key = now, (rd, sh)
         seq = self.store.next_seq()
         row = {"cycle_seq": seq, "ts": now.isoformat(timespec="microseconds"), "ct": ct, "is_ng": is_ng,
-               "part_code": f"{now:%Y%m%d}-{seq:06d}", "gap": None if gap is None else round(gap, 2),
-               "capped": capped, "ct_source": source}
+               "part_code": f"{now:%Y%m%d}-{seq:06d}", "gap": round(gap, 2), "excluded": round(excluded, 2),
+               "ct_source": source}
         self.store.add_cycle(rd, sh, row)
         with self.lock:
             self.info["events"] = self.info.get("events", 0) + 1

@@ -29,7 +29,8 @@ import urllib.parse
 import urllib.request
 
 SEGMENT_S = 4
-KEEP_SEGMENTS_S = 180       # segments are only needed until the cycle's clip is cut
+MAX_CLIP_S = 600            # a longer cycle gets a clip of its last 10 minutes
+KEEP_SEGMENTS_S = MAX_CLIP_S + 120   # segments are only needed until the cycle's clip is cut
 PREVIEW_IDLE_S = 20         # stop a preview-only ffmpeg this long after the last viewer leaves
 STALL_S = 15                # no frame for this long -> restart ffmpeg
 LATENCY_S = 0.5             # an IP camera's picture reaches us about this long after the moment it shows
@@ -333,6 +334,7 @@ class Camera:
         if self.info.get("recording"):
             cfg = self.get_cfg()
             pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
+            start = max(start, end - dt.timedelta(seconds=MAX_CLIP_S))
             self.clips.put((seq, start - dt.timedelta(seconds=pre), end + dt.timedelta(seconds=post)))
 
     # ----- internals -----
@@ -601,7 +603,7 @@ class Camera:
                "-i", "concat:" + "|".join(n for _, n in use), "-ss", f"{offset:.3f}",
                "-t", f"{dur:.3f}", "-map", "0:v:0", "-an", *vcodec, "-movflags", "+faststart", "-f", "mp4", tmp]
         r = subprocess.run(cmd, cwd=self.seg_dir(), stdin=subprocess.DEVNULL, capture_output=True,
-                           timeout=120, creationflags=NO_WINDOW)
+                           timeout=max(120, 2 * dur), creationflags=NO_WINDOW)
         if r.returncode != 0 or not os.path.isfile(tmp) or os.path.getsize(tmp) < 1024:
             try:
                 os.remove(tmp)

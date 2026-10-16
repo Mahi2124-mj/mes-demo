@@ -69,8 +69,12 @@ The server PC must be on the machine network (192.168.30.x).
 - Cycles: count mode *bit* = a rising edge on the OK bit (L108) or NG bit (L109), ignoring
   edges closer than "OK/NG pulse min gap"; mode *register* = the OK/NG counters (D101/D102) going up.
 - CT = the PLC's own "cycle time register" (default D103, 0.1 s units), read on each OK/NG signal.
-  If it is blank or 0: the time since the previous OK/NG signal; the first cycle of a shift then has no
-  known CT and is counted at the max allowed cycle time. CTs above the max allowed cycle are capped (`*`).
+  If it is blank or 0: the real time since the previous OK/NG signal (no cap), minus scheduled breaks,
+  PLC OFFLINE time and loss statuses inside that time. The first cycle of a shift is timed from the shift
+  start (+ start-up delay) or from when the collector reached the PLC, whichever is later. After a server
+  restart the next cycle is still timed from the last stored signal.
+- The clip is exactly the cycle time (cycles longer than 10 minutes get a clip of their last 10 minutes).
+  The CT graph's axis follows the data (2x to 6x the ideal CT).
 - Ideal CT (Machine Config) defaults to **10 s**. Speed loss is **net**: Σ(CT − ideal), so a 14 s cycle
   adds 4 s and a 9 s cycle takes 1 s back; it can go negative (shown green).
 - Status word (D100) is mapped through the line's status codes (0 IDLE, 1 RUNNING, 2 BREAKDOWN, …)

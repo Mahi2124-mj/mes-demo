@@ -379,8 +379,10 @@ export function CollectorLive({ dark = false }) {
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.cycle_seq}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{fmtTime(r.ts)}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}
-                      title={r.capped ? "Counted at the max allowed cycle time" : r.ct_source === "plc" ? "Cycle time from the PLC register" : "Time since the previous OK/NG signal"}>
-                    {r.ct?.toFixed?.(2) ?? r.ct}{r.capped ? " *" : ""}
+                      title={r.ct_source === "plc" ? "Cycle time from the PLC register"
+                        : `${r.ct_source === "first" ? "First cycle of the shift: from the shift start" : "Time since the previous OK/NG signal"}`
+                          + (r.excluded > 0 ? ` (${r.gap} s, minus ${r.excluded} s break / loss / PLC offline)` : "")}>
+                    {r.ct?.toFixed?.(2) ?? r.ct}
                   </td>
                   <td style={td}>
                     <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 800,

@@ -94,6 +94,14 @@ function pickDisplayMax(eMax, cycles) {
   return eMax;
 }
 
+// CT axis top: room for the slowest cycle in view (rounded up to 10 s), at least 2x and at most
+// 6x the ideal CT; a rarer, longer cycle is drawn at the top with a white ring.
+function ctAxisMax(values, ideal) {
+  const id = Number(ideal) > 0 ? Number(ideal) : 15;
+  const top = Math.max(0, ...values.map(Number).filter(Number.isFinite));
+  return Math.ceil(Math.max(id * 2, Math.min(top * 1.1, id * 6)) / 10) * 10;
+}
+
 function realCycleExtremes(cycles, ideal, fallback) {
   const id = Number(ideal) > 0 ? Number(ideal) : 15;
   const lo = id * 0.5;      // phantom floor (scan-fail warm-up, ~5-8s)
@@ -2053,7 +2061,7 @@ export default function Management2() {
     const ptRadius = visSlice.map(cy => cy.is_ng ? 5 : 3);
     const ptHoverR = visSlice.map(cy => cy.is_ng ? 9 : 6);
 
-    const Y_CAP   = isLoopPipe ? 30 : 40;
+    const Y_CAP   = ctAxisMax(visSlice.map(cy => cy.ct_value), idealCT);
     const ptBorder  = visSlice.map(cy => cy.ct_value > Y_CAP
                                        ? "#ffffff"
                                        : (D2 ? "#060912" : "#ffffff"));
@@ -2271,7 +2279,8 @@ export default function Management2() {
     const vals = [...ctData].reverse().filter(v => v !== null);
     if (!vals.length) return;
     const CT_TOL2 = 0.009;
-    const Y_CAP2 = /^\s*loop\s*pipe/i.test(line?.line_name || "") ? 30 : 40;
+    const Y_CAP2 = ctAxisMax(vals, idealCT);
+    cmsChartInst.current.options.scales.y.max = Y_CAP2;
     cmsChartInst.current.data.datasets[0].data =
       vals.map(v => v == null ? null : Math.min(v, Y_CAP2));
     cmsChartInst.current.data.datasets[0].pointBackgroundColor =
@@ -2424,7 +2433,7 @@ export default function Management2() {
         used: 0, excluded: 0,
       };
     }
-    const Y_CAP_AVG = 40;
+    const Y_CAP_AVG = 6 * (Number(line?.plc_config?.ideal_cycle_time) || 15);
     const raw = cmsData.map(cy => cy.ct_value).filter(v => v > 0);
     const capped = raw.filter(v => v <= Y_CAP_AVG);
     // Median of the capped subset for the 2.5× outlier guard.

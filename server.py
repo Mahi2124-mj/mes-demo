@@ -32,7 +32,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from camera import Camera
+from camera import Camera, MAX_CLIP_S
 from collector import OFFLINE, Collector, LiveStore, ShiftClock
 from demo_plc import DemoPlc, collector_settings, demo_cycle_times, signal_map
 
@@ -683,10 +683,10 @@ def cycle_videos_view(q):
     rows = []
     for c in reversed(STORE.cycles(rd, sh)):
         info = CAMERA.clip_info(c["cycle_seq"])
-        expected = round(c["ct"] + pre + post, 2)
+        expected = round(min(c["ct"], MAX_CLIP_S) + pre + post, 2)   # longer cycles: clip of the last 10 min
         video = info.get("duration") if info else None
         rows.append({"cycle_seq": c["cycle_seq"], "ts": c["ts"], "ct": c["ct"], "is_ng": c["is_ng"],
-                     "part_code": c.get("part_code"), "capped": c.get("capped"), "clip": info is not None,
+                     "part_code": c.get("part_code"), "long": c["ct"] > MAX_CLIP_S, "clip": info is not None,
                      "video_s": video, "expected_s": expected,
                      "diff_s": None if video is None else round(video - expected, 2)})
     shifts = [{"record_date": d, "shift_name": s_} for d, s_, _ in reversed(STORE.shift_files())]

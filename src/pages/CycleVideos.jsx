@@ -205,7 +205,7 @@ export default function CycleVideos() {
                           {r.is_ng ? "NG" : "OK"}
                         </span>
                       </td>
-                      <td style={{ ...td, ...mono, fontWeight: 700 }}>{fmt(r.ct)}{r.capped ? " *" : ""}</td>
+                      <td style={{ ...td, ...mono, fontWeight: 700 }}>{fmt(r.ct)}</td>
                       <td style={{ ...td, ...mono, color: C.sub }}>{fmt(r.expected_s)}</td>
                       <td style={{ ...td, ...mono, fontWeight: 700 }}>{r.clip ? fmt(r.video_s) : "—"}</td>
                       <td style={td}><Badge r={r} /></td>
@@ -267,7 +267,7 @@ export default function CycleVideos() {
                   Difference: <b style={{ color: statusOf(cur) === "off" ? C.ng : C.text }}>
                     {cur.diff_s == null ? "—" : `${cur.diff_s > 0 ? "+" : ""}${cur.diff_s.toFixed(2)} s`}</b>
                   {" "}· {cur.is_ng ? "NG" : "OK"} · part {cur.part_code || "—"}
-                  {cur.capped && <> · <span style={{ color: C.warn }}>CT capped at the max allowed cycle</span></>}
+                  {cur.long && <> · <span style={{ color: C.warn }}>cycle longer than 10 min: the clip shows its last 10 min</span></>}
                 </div>
               </>
             )}
