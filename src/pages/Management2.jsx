@@ -221,7 +221,7 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
     const keyOf  = ct => Math.floor(Math.round(ct * 10) / stepK) * stepK;
     const byCt = new Map();
     for (const b of data.buckets) if (b.ct <= MAX_CT) byCt.set(keyOf(b.ct), (byCt.get(keyOf(b.ct)) || 0) + b.count);
-    const loK  = keyOf(Math.min(...cts));
+    const loK  = keyOf(Math.max(0, Math.floor((Math.min(...cts, idCt) - 2) / 5) * 5));   // from a 5 s mark below
     const buckets = [];
     for (let k = loK; k <= MAX_CT * 10; k += stepK) buckets.push({ ct: k / 10, count: byCt.get(k) || 0 });
     const labels  = buckets.map(b => b.ct.toFixed(1));
@@ -294,6 +294,7 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
             beginAtZero: true,
             ticks: {
               color: textMut, font: { size: 10, family: "monospace" },
+              precision: 0,                                   // cycle counts are whole numbers
               callback: v => v.toLocaleString(),
             },
             grid: { color: "rgba(255,255,255,0.04)" },
