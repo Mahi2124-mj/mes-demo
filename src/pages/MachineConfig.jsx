@@ -26,6 +26,16 @@ const PLC_MODELS = [
 const PROTOCOLS = ["SLMP 3E (binary)", "SLMP 4E (binary)", "MC 3E ASCII"];
 const MAX_DATA_REGS = 15;
 
+// Andon (loss) registers: a value other than 0 puts that loss on the shift timeline.
+const ANDON_FIELDS = [
+  { key: "andon_maintenance", label: "Maintenance",  status: "Breakdown",   def: "D100" },
+  { key: "andon_quality",     label: "Quality",      status: "Quality",     def: "D200" },
+  { key: "andon_material",    label: "Material",     status: "Material",    def: "D300" },
+  { key: "andon_setup",       label: "Setup",        status: "Setup",       def: "D400" },
+  { key: "andon_change_over", label: "Change Over",  status: "Change Over", def: "D500" },
+  { key: "andon_others",      label: "Other Losses", status: "Others",      def: "D600" },
+];
+
 // ─── Defaults for the demo station ────────────────────────────
 const DEFAULTS = {
   machine_name: DEFAULT_MACHINE_NAME,
@@ -39,7 +49,8 @@ const DEFAULTS = {
   ok_data_register: "D101",
   ng_data_register: "D102",
   shift_reset_bit: "L110",
-  status_address: "D100",
+  status_address: "",
+  ...Object.fromEntries(ANDON_FIELDS.map(a => [a.key, a.def])),
   ct_register: "D103",          // PLC-measured cycle time; blank = time between OK/NG signals
   ct_register_scale: 0.1,
   ideal_cycle_time: 10.0,
@@ -137,6 +148,7 @@ function toPayload(f) {
     ng_data_register:    up(f.ng_data_register),
     shift_reset_bit:     up(f.shift_reset_bit),
     status_address:      up(f.status_address),
+    ...Object.fromEntries(ANDON_FIELDS.map(a => [a.key, up(f[a.key])])),
     ct_register:         up(f.ct_register),
     ct_register_scale:   toNum(f.ct_register_scale),
     ideal_cycle_time:    toNum(f.ideal_cycle_time),
@@ -209,7 +221,16 @@ function validate(f) {
 
   put("ok_bit_address", deviceError(f.ok_bit_address, { kind: "bit" }));
   put("ng_bit_address", deviceError(f.ng_bit_address, { kind: "bit" }));
-  put("status_address", deviceError(f.status_address, { kind: "word" }));
+  put("status_address", deviceError(f.status_address, { kind: "word", required: false }));
+  const used = { [up(f.ct_register)]: "Cycle Time Register" };
+  if (f.count_mode === "register") Object.assign(used, { [up(f.ok_data_register)]: "OK Data Register", [up(f.ng_data_register)]: "NG Data Register" });
+  ANDON_FIELDS.forEach(a => {
+    const err = deviceError(f[a.key], { kind: "word", required: false });
+    const v = up(f[a.key]);
+    if (err) e[a.key] = err;
+    else if (v && used[v]) e[a.key] = `Already used by ${used[v]}`;
+    else if (v) used[v] = `${a.label} andon`;
+  });
   put("ct_register", deviceError(f.ct_register, { kind: "word", required: false }));
   if (str(f.ct_register).trim()) put("ct_register_scale", numberError(f.ct_register_scale));
   if (f.count_mode === "register") {
@@ -787,7 +808,12 @@ export default function MachineConfig() {
                   <div className="mc-grid2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
                     {field("ok_bit_address", "OK Bit Address", { upper: true, placeholder: "e.g. L108" })}
                     {field("ng_bit_address", "NG Bit Address", { upper: true, placeholder: "e.g. L109" })}
-                    {field("status_address", "Status Address", { upper: true, placeholder: "e.g. D100" })}
+                    {field("status_address", "Status Address", { upper: true, placeholder: "blank = from the cycle signals",
+                      hint: (() => {
+                        const a = ANDON_FIELDS.find(x => up(form[x.key]) && up(form[x.key]) === up(form.status_address));
+                        return a ? `Same as the ${a.label} andon register: not read as a status word.`
+                                 : "Machine status word (0 idle, 1 running, 2+ loss). Blank: running / idle from the OK/NG signals.";
+                      })() })}
                     {field("ct_register", "Cycle Time Register", { upper: true, placeholder: "e.g. D103 (blank = measure)",
                       hint: "PLC's last cycle time, read on each OK/NG signal. Blank: time between signals." })}
                     {field("ct_register_scale", "Cycle Time Unit (s per count)", { type: "number", step: "0.001", min: 0,
@@ -825,6 +851,23 @@ export default function MachineConfig() {
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* Andon (loss) registers */}
+                <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 20, paddingTop: 20 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+                    <h4 style={sectionHead}>Andon (Loss) Registers</h4>
+                    <span style={{ fontSize: 10, color: "#64748b" }}>
+                      Value not 0 = that loss is on: shown on the shift timeline and in the loss distribution. Blank = not used.
+                    </span>
+                  </div>
+                  <div className="mc-grid3" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 16px" }}>
+                    {ANDON_FIELDS.map(a => (
+                      <div key={a.key}>
+                        {field(a.key, `${a.label} Andon`, { upper: true, placeholder: `e.g. ${a.def}`, hint: `Timeline: ${a.status}` })}
+                      </div>
+                    ))}
                   </div>
                 </div>
 

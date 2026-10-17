@@ -22,6 +22,15 @@ SLOW_POLL_S = 1.0          # status word, counters, monitor registers, inputs
 HEARTBEAT_S = 10.0
 OFFLINE = "PLC OFFLINE"
 
+# Andon (loss) registers on Machine Config: a value other than 0 means that loss is on. When more
+# than one is on, the first in this list wins. (config key, label, status on the timeline, default)
+ANDON = (("andon_maintenance", "Maintenance", "BREAKDOWN", "D100"),
+         ("andon_quality", "Quality", "QUALITY_ISSUE", "D200"),
+         ("andon_material", "Material", "MATERIAL_WAIT", "D300"),
+         ("andon_setup", "Setup", "MODEL_SETUP", "D400"),
+         ("andon_change_over", "Change over", "CHANGE_OVER", "D500"),
+         ("andon_others", "Other losses", "OTHER_LOSS", "D600"))
+
 DEFAULT_STATUS_MAP = {0: ("IDLE", None), 1: ("RUNNING", None), 2: ("BREAKDOWN", "breakdown"),
                       3: ("QUALITY_ISSUE", "quality"), 4: ("MODEL_SETUP", "setup"),
                       5: ("MATERIAL_WAIT", "material"), 6: ("OTHER_LOSS", "others"),
@@ -217,6 +226,8 @@ class Collector:
         self.last_cycle_at = None            # datetime of the last OK/NG signal
         self.last_cycle_key = None
         self.connected_at = None             # when the current PLC connection came up
+        self.last_ct = None                  # CT of the last cycle (how long RUNNING lasts without a signal)
+        self.andon = None                    # label of the andon call that set the current status
         self.override = None                 # PLC settings used instead of the saved ones (demo PLC)
 
     # ----- public -----
@@ -238,8 +249,8 @@ class Collector:
         """Forget every live cycle and status entry (and the in-memory cycle/status state)."""
         with self.slock:
             self.store.clear()
-            self.status = self.status_code = self.status_key = None
-            self.last_cycle_at = self.last_cycle_key = None
+            self.status = self.status_code = self.status_key = self.andon = None
+            self.last_cycle_at = self.last_cycle_key = self.last_ct = None
         with self.lock:
             self.info["events"] = 0
 
@@ -260,16 +271,19 @@ class Collector:
         m = {int(r["status_code"]): (r["status_name"], r.get("loss_type")) for r in rows if "status_code" in r}
         return m or DEFAULT_STATUS_MAP
 
-    def _log_status(self, name, code=None):
+    def _log_status(self, name, code=None, andon=None):
         with self.slock:
             when = _now()
             rd, sh, _ = self.clock.at(when)
             key = (rd, sh)
-            if name == self.status and key == self.status_key:
+            if name == self.status and key == self.status_key and andon == self.andon:
                 return
-            self.status, self.status_code, self.status_key = name, code, key
-            self.store.add_status(rd, sh, {"ts": int(when.timestamp() * 1000), "nowMinFrac": min_frac(when),
-                                           "status": name, "code": code, "shift": sh})
+            self.status, self.status_code, self.status_key, self.andon = name, code, key, andon
+            row = {"ts": int(when.timestamp() * 1000), "nowMinFrac": min_frac(when),
+                   "status": name, "code": code, "shift": sh}
+            if andon:
+                row["andon"] = andon
+            self.store.add_status(rd, sh, row)
 
     def _heartbeat(self):
         while True:
@@ -280,7 +294,7 @@ class Collector:
                     self.store.save_state()
                 # Shift changed with no status change: open the new shift's timeline.
                 if self.status:
-                    self._log_status(self.status, self.status_code)
+                    self._log_status(self.status, self.status_code, self.andon)
             except OSError:
                 pass
 
@@ -292,6 +306,7 @@ class Collector:
         if cyc:
             try:
                 self.last_cycle_at, self.last_cycle_key = dt.datetime.fromisoformat(cyc[-1]["ts"]), (rd, sh)
+                self.last_ct = cyc[-1].get("ct")
             except (KeyError, ValueError):
                 pass
 
@@ -352,6 +367,15 @@ class Collector:
         ok_reg = parse_address(cfg["ok_data_register"]) if cfg.get("ok_data_register") else None
         ng_reg = parse_address(cfg["ng_data_register"]) if cfg.get("ng_data_register") else None
         st_reg = parse_address(cfg["status_address"]) if cfg.get("status_address") else None
+        andon = []
+        for key, label, status, _ in ANDON:
+            try:
+                if str(cfg.get(key) or "").strip():
+                    andon.append((parse_address(cfg[key]), key, label, status))
+            except ValueError:
+                pass
+        if st_reg in {a for a, *_ in andon}:
+            st_reg = None                # the address is an andon register now, not a status word
         regs = []
         for r in cfg.get("monitor_registers") or []:
             try:
@@ -404,7 +428,7 @@ class Collector:
                           "ng_signal": {"address": format_address(*ng_bit), "value": None}}
                 if mode == "bit":
                     values["ok_signal"]["value"], values["ng_signal"]["value"] = int(cur[0]), int(cur[1])
-                words = [a for a in (ok_reg, ng_reg, st_reg) if a] + [a for a, _ in regs]
+                words = [a for a in (ok_reg, ng_reg, st_reg) if a] + [a for a, _ in regs] + [a for a, *_ in andon]
                 wv, werr = self._read_words_safe(client, words)
                 bv, berr = self._read_bits_safe(client, [a for a, _ in inputs] + ([] if mode == "bit" else [ok_bit, ng_bit]))
                 if mode == "register":
@@ -414,14 +438,20 @@ class Collector:
                 if ng_reg:
                     values["ng_count"] = {"address": format_address(*ng_reg), "value": wv.get(ng_reg)}
                 code = wv.get(st_reg) if st_reg else None
-                if code is not None and code in status_map:
-                    name = status_map[code][0]
-                else:   # status word missing/unknown: derive it from the cycle signals
-                    recent = self.last_cycle_at and (_now() - self.last_cycle_at).total_seconds() <= float(cfg.get("max_allowed_cycle") or 40)
-                    name = "RUNNING" if recent else "IDLE"
+                calls = [(a, label, status) for a, _, label, status in andon if wv.get(a)]
+                if calls:                    # an andon call: that loss, whatever the machine does
+                    a, label, name = calls[0]
+                    code, call = wv[a], f"{label} ({format_address(*a)})"
+                else:
+                    call = None
+                    name = status_map[code][0] if code is not None and code in status_map else None
+                    if name in (None, "IDLE"):   # no status word, or "idle": the cycle signals decide
+                        name = "RUNNING" if self._recent_cycle(cfg) else "IDLE"
                 if st_reg:
-                    values["status"] = {"address": format_address(*st_reg), "value": code, "name": name}
-                self._log_status(name, code)
+                    values["status"] = {"address": format_address(*st_reg), "value": wv.get(st_reg), "name": name}
+                values["andon"] = [{"key": key, "label": label, "address": format_address(*a), "status": status,
+                                    "value": wv.get(a), "on": bool(wv.get(a))} for a, key, label, status in andon]
+                self._log_status(name, code, call)
                 self._set(values=values, mode=mode, polls=polls,
                           read_errors=werr + berr or None,
                           registers=[{"register": format_address(*a), "content": r.get("content"), "unit": r.get("unit"),
@@ -465,6 +495,15 @@ class Collector:
             except SlmpError as e:
                 errs.append(f"{format_address(dev, n)}..{format_address(dev, n + cnt - 1)}: {e}")
         return out, errs
+
+    def _recent_cycle(self, cfg):
+        """RUNNING while the next signal is still due: up to the max allowed cycle, 3x the ideal CT or
+        1.5x the last CT, whichever is longest."""
+        if not self.last_cycle_at:
+            return False
+        window = max(float(cfg.get("max_allowed_cycle") or 40), 3 * float(cfg.get("ideal_cycle_time") or 10),
+                     1.5 * (self.last_ct or 0))
+        return (_now() - self.last_cycle_at).total_seconds() <= window
 
     @staticmethod
     def _plc_ct(client, cfg):
@@ -539,7 +578,7 @@ class Collector:
         else:
             # Time since the previous OK/NG signal, without breaks, PLC OFFLINE and loss time.
             ct = round(max(0.0, gap - excluded), 2)
-        self.last_cycle_at, self.last_cycle_key = now, (rd, sh)
+        self.last_cycle_at, self.last_cycle_key, self.last_ct = now, (rd, sh), ct
         seq = self.store.next_seq()
         row = {"cycle_seq": seq, "ts": now.isoformat(timespec="microseconds"), "ct": ct, "is_ng": is_ng,
                "part_code": f"{now:%Y%m%d}-{seq:06d}", "gap": round(gap, 2), "excluded": round(excluded, 2),

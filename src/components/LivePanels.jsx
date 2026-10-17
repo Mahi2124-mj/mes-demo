@@ -318,6 +318,23 @@ export function CollectorLive({ dark = false }) {
           {word("OK count", v.ok_count)}
           {word("NG count", v.ng_count)}
         </div>
+        {(v.andon || []).length > 0 && (
+          <>
+            <h4 style={{ ...head, marginTop: 16 }}>Andon (loss) calls</h4>
+            <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
+              {v.andon.map(a => (
+                <div key={a.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8,
+                                          background: a.on ? c.ngBg : c.deep, border: `1px solid ${a.on ? "rgba(220,38,38,.45)" : c.border}` }}>
+                  <Lamp on={a.on} color={STATUS_CLR[a.status] || "#dc2626"} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: c.text }}>{a.label}</div>
+                    <div style={{ fontSize: 10, color: c.sub, fontFamily: "monospace" }}>{a.address} = {a.value ?? "—"}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
         <h4 style={{ ...head, marginTop: 16 }}>Digital inputs</h4>
         {(plc.inputs || []).length === 0 ? (
           <div style={{ fontSize: 12, color: c.sub }}>No digital inputs configured.</div>

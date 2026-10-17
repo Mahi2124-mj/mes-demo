@@ -14,12 +14,14 @@ import struct
 import threading
 import time
 
+from collector import ANDON
 from slmp import parse_address
 
 CODES = {0x9C: "X", 0x9D: "Y", 0x90: "M", 0x92: "L", 0x93: "F", 0xA0: "B", 0x91: "SM",
          0xA8: "D", 0xB4: "W", 0xAF: "R", 0xA9: "SD", 0xB0: "ZR"}
 BIT_DEVS = {"X", "Y", "M", "L", "F", "B", "SM"}
 PULSE_S = 0.6            # how long the OK bit stays ON (the collector ignores edges < 0.5 s apart)
+ANDON_S = 15             # the demo's one andon call (first andon register, e.g. Maintenance) lasts this long
 
 
 def collector_settings(saved, port):
@@ -38,9 +40,12 @@ def signal_map(saved):
             return parse_address(v) if v else None
         except ValueError:
             return None
+    andon = [a for a in (addr(key, default) for key, _, _, default in ANDON) if a]
+    status = addr("status_address")
     return {"ok_bit": addr("ok_bit_address", "L108"), "ng_bit": addr("ng_bit_address", "L109"),
             "ok_count": addr("ok_data_register"), "ng_count": addr("ng_data_register"),
-            "status": addr("status_address"), "ct": addr("ct_register"),
+            "status": None if status in andon else status,      # an andon register is not a status word
+            "ct": addr("ct_register"), "andon": andon,
             "ct_scale": float(saved.get("ct_register_scale") or 0.1)}
 
 
@@ -151,7 +156,8 @@ class DemoPlc:
         """Run the cycles in real time on the addresses in `sig` (see signal_map); cycles whose
         number is in `ng_cycles` end with the NG signal. Returns False if stopped early."""
         signals = {a for a in (sig["ok_bit"], sig["ng_bit"], sig["ok_count"], sig["ng_count"],
-                               sig["status"], sig["ct"]) if a}
+                               sig["status"], sig["ct"], *sig["andon"]) if a}
+        andon_at = len(cycle_times) // 2 if sig["andon"] and len(cycle_times) >= 4 else None
 
         def extra(dev, n, v):                 # monitor registers / inputs: never over a saved signal
             if (dev, n) not in signals:
@@ -199,6 +205,12 @@ class DemoPlc:
                 self.put(*bit, 0)
             extra("X", 3, 0)
             extra("X", 4, 0)
+            if i == andon_at:                                # one andon call halfway: loss on the timeline
+                self.put(*sig["andon"][0], 1)
+                if self.stopped.wait(ANDON_S):
+                    return False
+                self.put(*sig["andon"][0], 0)
+                t_next = time.monotonic()
         if sig["status"]:
             self.put(*sig["status"], 0)                      # IDLE
         return True

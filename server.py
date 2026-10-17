@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from camera import Camera, MAX_CLIP_S
-from collector import OFFLINE, Collector, LiveStore, ShiftClock
+from collector import ANDON, OFFLINE, Collector, LiveStore, ShiftClock
 from demo_plc import DemoPlc, collector_settings, demo_cycle_times, signal_map
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
@@ -58,7 +58,8 @@ MACHINE_DEFAULTS = {
     "machine_name": "Nut-Runner Demo Station", "plc_model": "Mitsubishi FX5U-32MT/ESS",
     "plc_ip": "192.168.30.10", "plc_port": 5000, "protocol": "SLMP 3E (binary)", "count_mode": "bit",
     "ok_bit_address": "L108", "ng_bit_address": "L109", "ok_data_register": "D101",
-    "ng_data_register": "D102", "shift_reset_bit": "L110", "status_address": "D100",
+    "ng_data_register": "D102", "shift_reset_bit": "L110", "status_address": "",
+    **{key: default for key, _, _, default in ANDON},          # andon (loss) registers D100 ... D600
     "ideal_cycle_time": 10.0, "max_allowed_cycle": 40.0, "ok_ng_pulse_min_gap": 0.5,
     "ct_register": "D103", "ct_register_scale": 0.1,     # PLC-measured cycle time (blank = time between signals)
     "nf2_camera_id": "CAM-01", "machine_seq": 0,
@@ -470,7 +471,8 @@ def live_realtime(q):
         "collector_status": "running" if COLLECTOR.snapshot().get("state") == "connected" else "stopped",
         "ot_active_shift": None, "ot_plan": None,
         "takt_seconds": ideal, "working_minutes": working_min,
-        "planned_takt_seconds": ideal, "energy_per_part": None, "andon_calls": 0,
+        "planned_takt_seconds": ideal, "energy_per_part": None,
+        "andon_calls": sum(1 for e in STORE.status_log(rd, sh) if e.get("andon")),
     }
     newest = [c["ct"] for c in reversed(cyc)][:20]
     for i, v in enumerate(newest):
@@ -522,6 +524,25 @@ def live_hourly_loss_breakdown(q):
     return {"date": rd, "shift_name": sh, "slots": slots, "totals": tot}
 
 
+def live_ct_histogram(q):
+    """CT distribution of the live cycles of the last N days (default 30), 0.1 s buckets."""
+    try:
+        days = max(1, int((q.get("days") or ["30"])[0]))
+    except ValueError:
+        days = 30
+    since = (dt.date.today() - dt.timedelta(days=days - 1)).isoformat()
+    buckets = {}
+    for d, sh, _ in STORE.shift_files():
+        if d >= since:
+            for c in STORE.cycles(d, sh):
+                b = round(float(c["ct"]), 1)
+                buckets[b] = buckets.get(b, 0) + 1
+    rows = [{"ct": k, "count": v} for k, v in sorted(buckets.items())]
+    peak = max(rows, key=lambda r: r["count"]) if rows else {"ct": None, "count": 0}
+    return {"total_cycles": sum(buckets.values()), "peak_bucket": peak["ct"], "peak_count": peak["count"],
+            "buckets": rows, "window_days": days}
+
+
 def live_ct_history(q):
     rd, sh = _live_pick(q)
     return [{"id": c["cycle_seq"], "ts": c["ts"], "record_date": rd, "shift_name": sh, "ct_value": c["ct"],
@@ -542,7 +563,8 @@ def live_cycle_extremes(q):
 
 def live_status_log(q):
     rd, sh = _live_pick(q)
-    return [{"ts": e["ts"], "nowMinFrac": e["nowMinFrac"], "status": e["status"], "shift": sh}
+    return [{"ts": e["ts"], "nowMinFrac": e["nowMinFrac"], "status": e["status"], "shift": sh,
+             **({"andon": e["andon"]} if e.get("andon") else {})}
             for e in STORE.status_log(rd, sh)]
 
 
@@ -967,8 +989,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(live_status_log(q))
         if tail == "hourly-loss-breakdown":
             return self._json(live_hourly_loss_breakdown(q))
-        if tail == "ct-histogram":             # kept as before: the line's recorded 30-day distribution
-            return self._json(_load("mgmt/ct-histogram.json", {"total_cycles": 0, "buckets": []}))
+        if tail == "ct-histogram":
+            return self._json(live_ct_histogram(q))
         if tail == "production_history":
             return self._json(live_production_history())
         if tail == "ng-list":

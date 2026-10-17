@@ -77,20 +77,26 @@ The server PC must be on the machine network (192.168.30.x).
   The CT graph's axis follows the data (2x to 6x the ideal CT).
 - Ideal CT (Machine Config) defaults to **10 s**. Speed loss is **net**: Σ(CT − ideal), so a 14 s cycle
   adds 4 s and a 9 s cycle takes 1 s back; it can go negative (shown green).
-- Status word (D100) is mapped through the line's status codes (0 IDLE, 1 RUNNING, 2 BREAKDOWN, …)
-  into the shift timeline and loss times. If it is missing, RUNNING/IDLE is derived from the cycles.
-  `PLC OFFLINE` is logged while the PLC can't be reached.
+- **Andon (loss) registers** (Machine Config → PLC Config): one D register per loss, a value other
+  than 0 = that loss is on. Defaults: D100 Maintenance (timeline BREAKDOWN), D200 Quality, D300 Material,
+  D400 Setup, D500 Change over, D600 Other losses. The loss shows on the shift timeline (with the andon
+  name in its tooltip), in the loss distribution and the hourly loss table, and its time is left out of
+  the cycle time. Two calls at once: the first in that list counts.
+- Without an andon call: an optional status word (0 idle, 1 running, 2+ loss codes) if one is set and is
+  not an andon register; otherwise RUNNING while cycles keep coming (up to the max allowed cycle, 3x ideal
+  or 1.5x the last CT), IDLE after that. `PLC OFFLINE` is logged while the PLC can't be reached.
 - Shifts and hourly slots come from `data/mgmt/line.json`. Cycles made in a gap after a shift (OT) count
   for that shift. Plan = working time so far ÷ the machine's ideal CT (Machine Config). Time without PLC
   data (`PLC OFFLINE`) counts neither for plan nor against availability.
-- CT distribution keeps the line's recorded 30-day histogram (`data/mgmt/ct-histogram.json`).
+- CT distribution = the live cycles of the last 30 days (0.1 s buckets); its axis follows the data.
 - Cycle signals, counters and the digital inputs from "Monitor Config" are read every second and shown
   in **Collector Data** (Machine Config tab ④, and the 📡 COLLECTOR button on MANAGEMENT-2).
 
 **Demo PLC run — `demo_plc.py`** (Collector Data → ▶ Run demo)
 - Deletes all live data (cycles, timeline, clips), then a built-in demo PLC plays N cycles (default 30)
   over the same SLMP path: CT written to D103, OK pulse on L108. Cycle times are mixed around the ideal
-  (e.g. 9, 10, 14 s for 10 s), so speed loss goes + and −. Takes about N × ideal seconds.
+  (e.g. 9, 10, 14 s for 10 s), so speed loss goes + and −. Halfway it makes one 15 s andon call on the
+  first andon register (Maintenance), so a loss shows on the timeline. Takes about N × ideal + 15 seconds.
 - The real PLC is not read during the demo; the collector switches back to it afterwards.
 - Video: the real camera if it is streaming, otherwise a generated test picture (needs ffmpeg).
 

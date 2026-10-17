@@ -212,17 +212,24 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
       return;
     }
 
-    const MAX_CT = 40;
-    const byCt = new Map(data.buckets.map(b => [Math.round(b.ct * 10), b.count]));
-    const loK  = Math.round(Math.min(...data.buckets.map(b => b.ct)) * 10);
+    // Axis to the slowest cycle (at least 40 s / 2x ideal, at most 6x ideal); wider buckets on a wide axis.
+    const idCt   = Number(idealCt) > 0 ? Number(idealCt) : 15;
+    const cts    = data.buckets.map(b => b.ct);
+    const MAX_CT = Math.ceil(Math.max(40, idCt * 2, Math.min(Math.max(...cts), idCt * 6)) / 5) * 5;
+    const span   = MAX_CT - Math.min(...cts);
+    const stepK  = span <= 60 ? 1 : span <= 150 ? 5 : 10;          // bucket width in 0.1 s
+    const keyOf  = ct => Math.floor(Math.round(ct * 10) / stepK) * stepK;
+    const byCt = new Map();
+    for (const b of data.buckets) if (b.ct <= MAX_CT) byCt.set(keyOf(b.ct), (byCt.get(keyOf(b.ct)) || 0) + b.count);
+    const loK  = keyOf(Math.min(...cts));
     const buckets = [];
-    for (let k = loK; k <= MAX_CT * 10; k++) buckets.push({ ct: k / 10, count: byCt.get(k) || 0 });
+    for (let k = loK; k <= MAX_CT * 10; k += stepK) buckets.push({ ct: k / 10, count: byCt.get(k) || 0 });
     const labels  = buckets.map(b => b.ct.toFixed(1));
     const counts  = buckets.map(b => b.count);
 
-    const peak   = data.peak_bucket;
+    const peakK  = data.peak_bucket == null ? null : keyOf(data.peak_bucket);
     const colors = buckets.map(b => {
-      if (Math.abs(b.ct - peak) < 0.05) return "#fbbf24";
+      if (Math.round(b.ct * 10) === peakK) return "#fbbf24";
       if (b.ct > idealCt + 0.05)        return "rgba(239,68,68,0.85)";
       if (b.ct < idealCt - 0.05)        return "rgba(34,197,94,0.85)";
       return "rgba(245,158,11,0.85)";
@@ -305,7 +312,7 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
           const medStroke   = D ? "rgba(168,85,247,0.85)" : "rgba(126,34,206,0.9)";
 
           // ── Ideal CT vertical guide ──
-          const idx = labels.findIndex(l => Math.abs(parseFloat(l) - idealCt) < 0.05);
+          const idx = labels.findIndex(l => Math.round(parseFloat(l) * 10) === keyOf(idealCt));
           if (idx >= 0) {
             const xPx = xScale.getPixelForValue(idx);
             ctx.save();
