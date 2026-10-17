@@ -390,10 +390,6 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
   return (
     <div style={{ position: "absolute", top: 8, left: 12,
                    width: "calc(100% - 24px)", height: "calc(100% - 18px)" }}>
-      {/* Header strip — total count + peak.
-          2026-05-18-r11 — theme-aware background + text colour so the
-          chip is legible in light mode too (was dark-text-on-dark
-          semi-transparent bg → invisible in light mode). */}
       <div style={{
         position: "absolute", top: 0, right: 4, zIndex: 2,
         fontSize: 11, color: text, fontWeight: 700,
@@ -1246,7 +1242,7 @@ export default function Management2() {
     }
   }, [videoModal?._seek_offset, videoModal?._meta_loaded]);
 
-  const STATUS_DEBOUNCE_MS = 6000;  // kept as reference value (no longer used for writes)
+  const STATUS_DEBOUNCE_MS = 6000;
   useEffect(() => {
     if (!rt || !line) return;
     // Seed the in-memory ref so the legacy debounce code that other
@@ -2807,16 +2803,6 @@ export default function Management2() {
         video::-webkit-media-controls-overflow-button{display:none!important;}
       `}</style>
 
-      {/* ── ORIENTATION ESCAPE HATCH (removed 2026-05-18) ──
-          Earlier this rendered a floating circular toggle pinned at
-          top:12/right:12 outside the rotated container.  Goal was to
-          stay upright when portrait so operator could un-rotate.
-          But it overlapped the existing fullscreen [⛶] button in the
-          header (same corner), and the header's own 16:9/9:16 toggle
-          was duplicated.  Reverted — the in-header toggle plus the
-          `R` keyboard shortcut (registered below) cover both cases
-          without UI clutter.  See git blame for full original block. */}
-
       {/* ── GAP-SHIFT BANNER ── */}
       {gapShift && (
         <div style={{
@@ -2858,17 +2844,6 @@ export default function Management2() {
         transform:   needsRotation ? "rotate(90deg)" : undefined,
       }}>
 
-        {/* ── 1. HEADER ──
-            overflow:"visible" override so the machine-toggle dropdown
-            (position:absolute inside this card) isn't clipped by the
-            card()'s default overflow:hidden.  zIndex bump keeps the
-            whole header above sibling KPI cards.
-            2026-05-18-r8 — `flexWrap:"wrap"` + left/right groups also
-            wrap so on a narrow portrait viewport (phone / tablet) the
-            elements that won't fit on one row flow down to a second
-            row instead of getting clipped.  Operator complaint:
-            "details upr row me nhi aa rhi vo second row mw exist
-            kr de".                                                  */}
         <div style={{...card(),gridColumn:"1/-1",display:"flex",alignItems:"center",
                      justifyContent:"space-between",
                      flexWrap:"wrap", rowGap: 4,
@@ -2879,9 +2854,6 @@ export default function Management2() {
           <div style={{display:"flex",alignItems:"center",
                        flexWrap:"wrap", rowGap: 4,
                        gap: isPortrait ? 8 : 14, minWidth: 0}}>
-            {/* Slide-nav menu — portaled to <body> so it escapes the rotate()
-                wrapper (a transformed ancestor breaks position:fixed). Trigger
-                hidden; the logo click below opens it via "tbdi:open-nav". */}
             {createPortal(<SlideNav hideTrigger raise />, document.body)}
             <img src="/logo.jpg" alt="logo"
                   onClick={() => window.dispatchEvent(new Event("tbdi:open-nav"))}
@@ -2895,10 +2867,6 @@ export default function Management2() {
                     flexShrink: 0,
                   }}/>
             <div style={{ minWidth: 0, position: "relative" }}>
-              {/* 2026-09-13 — Loop Pipe lines only: the line-NAME text becomes a
-                  dropdown to switch between the Loop Pipe lines (keeps the same
-                  view — Management / Supervisor / Fullscreen). Every other line
-                  keeps the plain, non-clickable line name below. */}
               {loopLines.length > 0 ? (
                 <div
                   onClick={() => setLoopMenuOpen(o => !o)}
@@ -2997,12 +2965,6 @@ export default function Management2() {
               title={rt?.andon_calls ? `Andon: ${rt.andon_calls}` : undefined}>
               {status}
             </span>
-            {/* 2026-05-16 — MACHINE PILL (yellow-box position).
-                Shows the line's MAIN machine name + (machine_seq) badge.
-                Click → dropdown lists all machines on this line (Main +
-                Subs) so operator can hop to any of them.  Main = stays
-                on /fullscreen/<line_id>; Sub navigates to
-                /submachine/<sub_id> for that machine's detail view. */}
             {(() => {
               const zoneMode    = zoneLines.length > 0;
               const mainMachine = machines.find(m => !m.parent_plc_id);
@@ -3032,11 +2994,6 @@ export default function Management2() {
                     )}
                     {hasMenu && <span style={{fontSize:9,opacity:.5,marginLeft:2}}>▾</span>}
                   </button>
-                  {/* 2026-08-12 — jump to the SUPERVISOR view of this same line.
-                      The two screens are the same line seen two ways, and people
-                      were re-typing the URL to move between them.  Uses the line
-                      NAME so the address bar and tab title stay readable
-                      (/Y17-SS/SUPERVISOR); the backend resolves either form. */}
                   <button
                     onClick={() => {
                       const ref = String(line?.line_name || lineId).trim().replace(/\s+/g, "-");
@@ -3105,14 +3062,6 @@ export default function Management2() {
                            minWidth:240,maxHeight:300,overflowY:"auto",
                            boxShadow:"0 12px 32px rgba(0,0,0,.55)",
                            zIndex:9999,padding:4}}>
-                      {/* 2026-05-16 — Number-first layout per operator
-                          spec: "front me 1 2 3 4 aise aana chahiye"
-                          instead of MAIN/SUB badges + trailing (N).
-                          Number = machine_seq if admin set it, else
-                          falls back to position in the list (1-indexed)
-                          so EVERY row always shows a sensible badge.
-                          Currently-viewed row stays highlighted SETUP
-                          color so operator knows where they are. */}
                       {machines.map((m, idx) => {
                         const isMain    = !m.parent_plc_id;
                         const isCurrent = isMain;     // on Fullscreen.jsx = MAIN view
@@ -3175,11 +3124,6 @@ export default function Management2() {
           <div style={{display:"flex",alignItems:"center",
                        flexWrap:"wrap", rowGap: 4,
                        gap:10}}>
-            {/* 2026-05-16 — MODEL NAME (red-box position).
-                Moved out of the left cluster to the right cluster per
-                operator spec: yellow box now shows machine, red box
-                shows the running model.  Model No. is small/muted
-                preface; model name strong. */}
             {rt.current_model_name && (
               <span style={{fontSize:12,color:textSub,display:"inline-flex",alignItems:"center",gap:6,
                 padding:"3px 10px",borderRadius:99,
@@ -3219,13 +3163,6 @@ export default function Management2() {
               border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
               {D?"☀ LIGHT":"🌙 DARK"}
             </button>
-            {/* Rotate dashboard — toggle layout for vertically-mounted
-                screens.  2026-05-18-r8 — Chip displays the CURRENT
-                layout (natural mapping): "9:16" while in portrait
-                grid, "16:9" while in landscape grid.  Clicking
-                toggles to the other layout.  Whether CSS rotation
-                gets applied is decided separately by `needsRotation`
-                (viewport-vs-layout mismatch).                        */}
             <button
               onClick={() => setOrientation(o => o === "portrait" ? "landscape" : "portrait")}
               title={isPortrait ? "Switch to landscape (16:9) layout" : "Switch to portrait (9:16) layout"}
@@ -3271,12 +3208,6 @@ export default function Management2() {
           </div>
         </div>
 
-        {/* ── LEFT CONTENT COLUMN ──
-            16:9: column flex (KPI top, chart middle, Loss bottom).
-            9:16: `display:contents` so its children participate directly
-                  in the outer 3×6 grid — operator drew the layout where
-                  KPI block, Loss Dist, and Chart card each live in their
-                  own row/col of the outer grid (no nested wrapper).      */}
         <div style={{
           ...(isPortrait
             ? { display: "contents" }
@@ -3284,14 +3215,6 @@ export default function Management2() {
                 gap:6, minHeight:0, overflow:"hidden" }),
         }}>
 
-        {/* ── 2. KPI STRIP ──
-            16:9: horizontal flex-wrap row of tiles at the top of LEFT CONTENT.
-            9:16: KPI block at outer-grid row 2 col 1 — internal CSS grid
-                  with 4 columns × 2 sub-rows:
-                    sub-row a — OEE | Availability | Performance | Quality
-                    sub-row b — Production | Cycle Time | Takt Time | —
-                  Production/CT/Takt are LEFT-aligned in row b (the 4th
-                  cell of row b is empty, matching operator's spec).      */}
         <div style={{
           gap:6, flexShrink:0,
           ...(isPortrait
@@ -3401,11 +3324,6 @@ export default function Management2() {
                   </span>
                 </div>
               </div>
-              {/* 2026-05-18-r12 — Per Part kWh MOVED to the Takt Time
-                  card (operator spec: "ye stats ko tu takt time wale me
-                  dal de").  Production card now keeps just Plan / Actual
-                  / OK·NG; the energy KPI lives alongside Plan / Actual /
-                  Variance in the Takt card below. */}
             </div>
           </div>
 
@@ -3434,11 +3352,6 @@ export default function Management2() {
                       title={ctStats.excluded > 0
                         ? `${ctStats.excluded} outlier cycle(s) excluded (breakdown overlap or >40s — see chart)`
                         : "Average cycle time across all cycles this shift"}>
-                  {/* 2026-05-18-r13 — Operator spec: "-16 wala jo h vo
-                      hta de only avg ct aaye".  Hide the explicit
-                      excluded-outlier count; only the clean used-count
-                      remains in parentheses.  The breakdown rationale
-                      is still surfaced via the hover tooltip above. */}
                   Avg{ctStats.used > 0 ? ` (${ctStats.used})` : ""}
                 </span>
                 <span style={{fontFamily:"monospace",
@@ -3458,18 +3371,6 @@ export default function Management2() {
             </div>
           </div>
 
-          {/* ── TAKT TIME ────────────────────────────────────────────
-              2026-05-14 — operator redesign: this card is now purely a
-              SECONDS view of takt vs actual cycle pace, NOT production
-              counts (those live in the OK/NG card above).  Three rows:
-                Plan     = rt.planned_takt_seconds (admin-configured
-                            customer-demand rhythm).  Falls back to the
-                            auto-derived rt.takt_seconds, then to ideal.
-                Actual   = avgCT (running mean of all cycles this shift —
-                            same value shown in the Cycle Time card).
-                Variance = Plan − Actual, in seconds.  Positive ⇒ we're
-                            faster than takt (good, green).  Negative ⇒
-                            slower than takt (bad, red). */}
           {(() => {
             const takPlan = (rt?.planned_takt_seconds != null && rt.planned_takt_seconds > 0)
               ? Number(rt.planned_takt_seconds)
@@ -3520,10 +3421,6 @@ export default function Management2() {
                         : "—"}
                     </span>
                   </div>
-                  {/* 2026-05-18-r12 — Per Part kWh moved here from the
-                      Production card (operator spec).  Same theme-aware
-                      amber pill design that was used in the Production
-                      slot — bright in dark mode, deep amber in light. */}
                   {rt?.energy_per_part != null && rt.energy_per_part > 0 && (
                     <div style={{borderTop:`1px solid ${border}`,marginTop:2,paddingTop:3,
                                  display:"flex",justifyContent:"space-between",alignItems:"center"}}
@@ -3552,13 +3449,6 @@ export default function Management2() {
 
         </div>
 
-        {/* ── 3. CHART + SIDE PANEL ──
-            16:9: own 2-col sub-grid (chart 1fr + Loss Distribution 215px).
-            9:16: `display:contents` so the chart card + Loss Distribution
-                  card escape this wrapper and participate directly in the
-                  outer 3×6 grid:
-                    Chart card     → row 3, full width (gridColumn 1/-1)
-                    Loss Dist card → row 2, col 2 (operator-drawn center) */}
         <div style={{
           ...(isPortrait
             ? { display: "contents" }
@@ -3567,34 +3457,6 @@ export default function Management2() {
                 gap: 6, flex: 1, minHeight: 0 }),
         }}>
 
-          {/* 2026-05-18-r9 — PORTRAIT QUAD PANEL.
-              Operator spec from sample.docx: in 9:16 mode the chart
-              area shows a 2×2 grid of 4 always-visible mini charts:
-                ┌──────────────────┬──────────────────┐
-                │ CT Graph (video) │ Weekly Plan vs   │
-                │                  │   Actual (daily) │
-                ├──────────────────┼──────────────────┤
-                │ Monthly Plan vs  │ CT Distribution  │
-                │ Actual cumul OK  │  + median CT     │
-                └──────────────────┴──────────────────┘
-              Bottom rows (timeline + hourly) stay untouched per
-              "niche timeline and hourly same rhegi".  In landscape
-              the existing single chart-card with toggle stays.  */}
-          {/* 2026-05-18-r10 — Quad reorganised to 3-row stack per
-              operator's reference photo:
-                ┌───────────────────────────────────────────────────┐
-                │ Row 1 · CT Graph (Daily) — FULL WIDTH             │
-                ├───────────────────────────────────────────────────┤
-                │ Row 2 · Weekly Plan vs Actual — FULL WIDTH        │
-                ├───────────────────────┬───────────────────────────┤
-                │ Row 3a · CT histogram │ Row 3b · Monthly Plan vs  │
-                │   + median line       │  Actual (cumulative)      │
-                └───────────────────────┴───────────────────────────┘
-              Operator quote: "cycle time and weekly graph side by
-              side kr dia, aise aana chaihiye upr niche, and last ek
-              sath" — so CT and Weekly stack top-to-bottom (each full
-              width), and only the bottom row splits 50/50 for the
-              Monthly + Histogram pair.                              */}
           {isPortrait && (
             <div style={{
               gridColumn: "1 / -1", gridRow: 3,
@@ -3603,12 +3465,6 @@ export default function Management2() {
               gridTemplateRows: "1fr",
               gap: 6, minHeight: 0,
             }}>
-              {/* ── Row 1 · CT Graph (full width, click-to-video)
-                  2026-05-18-r13 — Full tool strip restored (slider +
-                  Min/Max chips + slot filter + NG nav) per operator
-                  feedback: "ct wale sare tool nhi aa rhe".  Toggle
-                  buttons stay hidden — portrait shows ALL 4 charts at
-                  once so a mode switcher is meaningless here.        */}
               <div style={{...card(),
                   gridColumn: 1, gridRow: 1,
                   display:"flex", flexDirection:"column", minHeight:0, overflow:"hidden"}}>
@@ -3683,9 +3539,6 @@ export default function Management2() {
                           </select>
                         )}
 
-                        {/* NG navigator — scroll-only, with inline
-                            current-NG label so operator knows which
-                            dot they're pointing at without opening a modal. */}
                         <span style={{color:"#ef4444",fontWeight:800,fontSize:9}}
                               title={ngTotal !== ngIndices.length
                                        ? `Shift counter: ${ngTotal} · chart dots: ${ngIndices.length}`
@@ -3747,9 +3600,6 @@ export default function Management2() {
                       display:"flex", flexDirection:"column"}}>
                     <div style={{flex:1, position:"relative", minHeight:0}}>
                       <canvas ref={cmsChartRef} style={{display:"block", width:"100%", height:"100%"}}/>
-                      {/* 2026-05-28 — Top-right legend overlay (CSS-only,
-                          no chart logic).  4 chips operator asked for:
-                          line-segment (below/above target) + dot (OK/NG). */}
                       <div style={{
                         position:"absolute", top:6, right:8,
                         display:"flex", gap:8, alignItems:"center",
@@ -3849,7 +3699,6 @@ export default function Management2() {
             </div>
             )}
 
-          {/* ── Documents: Track Record / 4M Change / Operator Visualization / Safety / Defect Record ── */}
           {isPortrait && (
             <DocSheetsRow card={card} hdr={hdr} lbl9={lbl9} textMut={textMut}
                           style={{ gridColumn: "1 / -1", gridRow: 6 }} />
@@ -3898,11 +3747,6 @@ export default function Management2() {
               <div style={{display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:600,color:textMut,marginLeft:"auto",flexShrink:0}}>
                 {chartMode === "ct" && cmsData.length > 0 && (
                   <>
-                    {/* ── INLINE MIN / MAX CHIPS ────────────────────────
-                        2026-05-15 — moved out of a side card into the
-                        chart header to keep KPI strip margins clean.
-                        Each chip is clickable → opens the same cycle
-                        video modal that the chart dots open. */}
                     {(() => {
                       const _rx  = realCycleExtremes(cmsData, line?.plc_config?.ideal_cycle_time || 15, extremes);
                       const eMin = chipMin || _rx.min;
@@ -4031,15 +3875,6 @@ export default function Management2() {
                 position:"absolute",top:8,left:12,width:"calc(100% - 24px)",height:"calc(100% - 18px)"
               }}/>
 
-              {/* 2026-05-18-r4 — Bar-chart empty/loading state.  Without this
-                  the canvas just looks blank when (a) the production_history
-                  fetch is in flight and history===null, or (b) the line has
-                  no non-GAP records in the lookback window.  Operator
-                  complaint: "DAILY WEEKLY MONTHLY KEE BARGRAPH JO SHOW HOTE
-                  THE ABHI TKK VOH HTT GYE HAI BLANK SCREEN SHOW HORI HAI".
-                  Visible only when (i) we're in a bar-chart mode and
-                  (ii) there's nothing to render — the chart canvas itself
-                  always sits beneath so a real bar render covers this. */}
               {chartMode !== "ct" && chartMode !== "histogram"
                 && (!history || history.length === 0) && (
                 <div style={{
@@ -4086,7 +3921,6 @@ export default function Management2() {
                   position:"absolute",top:8,left:12,right:12,bottom:4,
                   display:"flex",flexDirection:"column",
                 }}>
-                  {/* ECG spike graph — fixed 40-cycle window */}
                   <div style={{flex:1,position:"relative",minHeight:0}}>
                     <canvas ref={cmsChartRef} style={{display:"block"}}/>
                   </div>
@@ -4171,13 +4005,6 @@ export default function Management2() {
         </div>
         </div>{/* ── end LEFT CONTENT COLUMN ── */}
 
-        {/* 2026-05-18-r9 — Standalone histogram card REMOVED.
-            The CT Distribution histogram now lives in the bottom-right
-            cell of the portrait quad panel (above), keeping it always
-            visible alongside the CT graph, Weekly, and Monthly views.
-            Row 4 of the outer grid is reclaimed; gridTemplateRows was
-            shortened from 6 rows to 5 in the parent grid styles.   */}
-
         {/* ── RIGHT COLUMN — PY STATUS + SENSOR STATUS stacked ──────
             16:9: row 2 col 2 of outer grid (1fr × 285px layout).
             9:16: row 2 col 3 of outer grid (3-col KPI band, far right).
@@ -4189,12 +4016,6 @@ export default function Management2() {
           ...(isPortrait ? { gridColumn: 3, gridRow: 2 } : {}),   // demo page 2: beside the KPI band only
         }}>
 
-          {/* ── POKA-YOKE STATUS BUTTON ─────────────────────────────
-              2026-05-13 — operator spec: turn the long vertical PY list
-              into ONE single button.
-                • Green "✓ All Set OK" when every check is passing
-                • Red   "⚠ N Failed"   when any check is bypassed
-                • Tap   → hourly breakdown modal */}
           {(() => {
             const pyFailedCount = pokaStatus.filter(p => p.is_bypassed).length;
             const pyAllOk       = pokaStatus.length > 0 && pyFailedCount === 0;
@@ -4258,17 +4079,6 @@ export default function Management2() {
             );
           })()}
 
-          {/* ── SENSOR STATUS BUTTON ────────────────────────────────
-              2026-05-13 — same UX as PY card.  X-bit health snapshot
-              from collector via /api/poka-yoke/sensor-sweep/<line_id>.
-                • Green "✓ All Sensing" — every X-bit is toggling
-                • Red   "⚠ N Desensed" — N bits have not toggled for
-                                          longer than the stuck-threshold
-                • Tap   → modal showing a LOG of stuck periods.
-                          When healthy: empty log.
-                          When stuck:   PY name + bit + from-to range.
-              Button is ALWAYS clickable — even with no snapshot yet,
-              tapping shows "no log yet" state instead of doing nothing. */}
           {(() => {
             const entries  = sensorSweep?.entries || [];
             const counts   = sensorSweep?.counts || {};
@@ -4352,14 +4162,6 @@ export default function Management2() {
             );
           })()}
 
-          {/* ── 2026-08-07 — RECLINER-ONLY: WELD MONITOR + PM CHECK ───
-              Operator asked for two more tiles on the Recliner fullscreen,
-              styled exactly like the Poka-Yoke / Sensor Health buttons above.
-              SHELLS ONLY for now, per spec ("abhi sirf button bna, no another
-              change"): no API call, no modal, no collector/DB touch — the tap
-              handler is deliberately empty until the behaviour is specified.
-              Gated to Recliner lines because Fullscreen.jsx is shared by every
-              line; without the gate these would appear on all of them. */}
           {/* Weld Monitor is Recliner-only (that is where the weld cards are
               wired); PM Check applies to Seat Slider too, since the yearly plan
               covers both zones.  Gated on zone_id rather than the line name —
@@ -4417,7 +4219,7 @@ export default function Management2() {
                   rows when the quad panel absorbed the histogram). */}
         <div style={{...card(),gridColumn:"1/-1",
                       padding:"6px 12px",display:"flex",flexDirection:"column",gap:5,
-                      ...(isPortrait ? { gridRow: 5 } : {}),   // 2026-08-10 shifted (new chart row)
+                      ...(isPortrait ? { gridRow: 5 } : {}),
                     }}>
 
           {/* Header */}
@@ -4513,15 +4315,6 @@ export default function Management2() {
               );
             })}
 
-            {/* ── OT segment ───────────────────────────────────────
-                2026-05-13 — operator spec: when OT is active, the
-                shift-timeline bar must extend past shift_end into the
-                OT window and paint actual status segments inside it
-                (RUNNING / BREAKDOWN / IDLE etc) so the team sees what
-                happened during overtime.  Geometry uses the same
-                relative-frame as the regular slots (sStart-based,
-                sDur-extended).  Status segments reuse buildSlotSegments
-                — same status log, same color mapping. */}
             {otActive && shiftCfg?.ot_end_time && (() => {
               const sEndMin   = sEnd;
               const otEndMin  = toMin(shiftCfg.ot_end_time);
@@ -4667,8 +4460,6 @@ export default function Management2() {
                       <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,lineHeight:1.1}}>
                         <span style={{color:s.isFuture?"rgba(100,100,100,0.3)":s.okDB>0?STATUS_CLR["RUNNING"]:textMut}}>{s.okDB}</span>
                         <span style={{color:textMut,margin:"0 2px"}}>/</span>
-                        {/* 2026-05-21 — NG cell clickable: opens modal
-                            with table of all NG parts in this slot. */}
                         <span
                           onClick={(s.ngDB > 0 && !s.isFuture)
                                     ? () => setNgListModal({ slot: s.label, date: rtRef.current?.record_date || new Date().toISOString().slice(0,10) })
@@ -4747,19 +4538,6 @@ export default function Management2() {
       )}
 
       {/* ── Video Modal ── */}
-      {/* The modal stays mounted as long as there's a cycle loaded OR an
-          active PiP window, so that clicking a different cycle just swaps
-          the src inside the same <video> element (and therefore the same
-          PiP window) instead of creating a new one. When PiP is active but
-          the user has closed the modal UI, we hide the overlay with CSS
-          rather than unmounting.
-
-          2026-05-19 — REVERTED r17.  Operator wants the popup to be
-          ALWAYS landscape (upright on the physical monitor), NOT
-          rotated with the dashboard.  overlayPosStyle is now plain
-          `position:fixed; inset:0`; React-Portal still escapes the
-          rotated dashboard's transform-ancestor, so the popup covers
-          the natural viewport without inheriting any CSS rotation. */}
       {videoModal && createPortal((
         <div
           onClick={() => {
@@ -4798,7 +4576,7 @@ export default function Management2() {
                     ? (D ? "#1a0a0d" : "#fef2f2")
                     : (D ? "#0a0f1a" : "#ffffff"),
                   borderRadius:12,padding:12,
-                  maxWidth:560,width:"90vw",      // demo: compact video popup (was 820 / 92vh)
+                  maxWidth:560,width:"90vw",
                   maxHeight:"70vh",
                   display:"flex", flexDirection:"column",
                   boxShadow: videoModal?.is_ng
@@ -4809,11 +4587,6 @@ export default function Management2() {
                     : `1px solid ${border}`,
                 }}
           >
-            {/* 2026-05-23 — Header chrome hidden in fullscreen mode so
-                only the video is visible (operator complaint: "video ko
-                fullscreen krne prr comments hata jaye jaise youtube ka
-                fullscreen").  Buttons re-rendered as a floating overlay
-                inside the expanded mode below. */}
             <div style={{
               display: videoExpanded ? "none" : "flex",
               justifyContent:"space-between",alignItems:"center",marginBottom:10,flexShrink:0,
@@ -4823,15 +4596,6 @@ export default function Management2() {
                 {videoModal.part_code && (
                   <> {"  |  "}ID: <span style={{fontFamily:"monospace",color:"#3b82f6"}}>{String(videoModal.part_code).replace(/:$/, "")}</span></>
                 )}
-                {/* 2026-05-27 — Always show the cycle's stored CT (from
-                    DB).  Earlier this preferred `_video_duration` from
-                    the HTML5 player, but with fragmented-MP4 stream
-                    copy the browser reports duration as 2.00 s (size
-                    of the first fragment) until the full file buffers
-                    — so the header read "2.00s" for every clip even
-                    when the video was clearly 9 s long.  The DB CT is
-                    the cycle measurement we trust everywhere else
-                    (chart, tooltip), so use that here too. */}
                 {"  |  "}
                 {(() => {
                   const dbCt = Number(videoModal.ct_value) || 0;
@@ -4890,10 +4654,6 @@ export default function Management2() {
                 >×</button>
               </div>
             </div>
-            {/* 2026-05-23 — Floating control overlay in fullscreen mode.
-                Operator wanted YouTube-style true fullscreen: header
-                chrome hidden, only the video visible, with collapse +
-                close buttons floating over the top-right corner. */}
             {videoExpanded && (
               <div style={{
                 position:"absolute", top:14, right:14, zIndex:10,
@@ -4938,11 +4698,6 @@ export default function Management2() {
                 >×</button>
               </div>
             )}
-            {/* 2026-05-22 — Scrollable body so video + NG details + comments
-                all fit in one 92vh modal even on smaller screens.
-                2026-05-23 — In fullscreen mode the body bypasses scroll
-                and the panels below the video are hidden (only video
-                renders) so the experience matches a YouTube fullscreen. */}
             <div style={{
               flex: 1, minHeight: 0,
               overflowY: videoExpanded ? "hidden" : "auto",
@@ -5092,22 +4847,6 @@ export default function Management2() {
               />
               {/* always-visible progress + time (native strip fades out) */}
               <VideoProgressBar videoRef={videoElRef} />
-              {/* 2026-05-31 — "Please wait while loading" text card that
-                  REPLACES the browser's native round buffering spinner.
-                  The transparent full-area overlay lets the bottom
-                  controls strip stay visible; the centered opaque card is
-                  sized large enough to fully mask the native throbber that
-                  renders behind it.  pointerEvents:none so play/seek
-                  clicks still reach the video + controls underneath. */}
-              {/* 2026-08-11 — same "loading cycle video" cover as the Machine CT
-                  modal, so both screens look like one product.  A cycle clip is
-                  transcoded out of the camera's rolling .ts on demand, so there
-                  is a real wait before the first frame; this shows a calm
-                  shimmer + moving bar instead of the old plain text box (and
-                  covers the browser's own round spinner).  Indeterminate on
-                  purpose: this player autoPlays on the first bytes, so a
-                  percentage would barely have time to move.  pointerEvents:none
-                  keeps the controls underneath usable. */}
               {videoBuffering && (
                 <div style={{
                   position:"absolute", inset:0, zIndex:5, borderRadius:8,
@@ -5143,21 +4882,6 @@ export default function Management2() {
                   </div>
                 </div>
               )}
-              {/* 2026-05-21 — Big centered play/pause overlay.
-                  Video loops automatically (loop attr); operator can
-                  tap anywhere on video OR this 96 px target to toggle
-                  play/pause.  Modal close = X button or backdrop click. */}
-              {/* 2026-05-22 — Center big-play overlay removed per
-                  operator request "video pe hover karne pe center me jo
-                  aata hai isko hata".  Native controls strip at the
-                  bottom + ↺ replay button at top-left cover the
-                  play/pause/seek workflow cleanly. */}
-              {/* 2026-05-21-r2 — Replay-from-start button.  Operator
-                  spec: "replay from beginning ka bhi button aana
-                  chahiye".  Top-left corner of the video, always
-                  visible so operator can re-watch any cycle instantly
-                  without waiting for the natural loop boundary or
-                  dragging the native scrubber to 0. */}
               <button
                 className="fs-replay"
                 title="Replay from start"
@@ -5193,13 +4917,6 @@ export default function Management2() {
                 </svg>
               </button>
               </div>
-              {/* 2026-05-21 — NG details panel.  Only renders when the
-                  current cycle is NG (videoModal.is_ng).  Shows the
-                  machine-derived reason (auto from cycle CT + sub-machine
-                  logs) AND lets the line leader save their exact remark
-                  after physical inspection.  Sits between video and the
-                  general comments thread.
-                  2026-05-23 — Hidden in fullscreen mode (YouTube style). */}
               {!videoExpanded && videoModal.is_ng && videoModal.part_code && (
                 <FsNgDetailsPanel
                   lineId={lineId}
@@ -5211,23 +4928,6 @@ export default function Management2() {
                   bgDeep={bgDeep}
                 />
               )}
-              {/* 2026-05-24 — Process-wise NG remarks panel REMOVED from
-                  Fullscreen.  Operator: "main fullscreen me sirf final
-                  ki details rkhni h, process wise remarks ka wallboard
-                  wale page me dalne ko bola tha".  Panel still lives in
-                  WallboardLeft.jsx for sub-machine NG video modal. */}
-              {/* 2026-05-21 — Per-cycle Comments panel (same as
-                  WallboardLeft).  Fullscreen modal always shows main-PLC
-                  (Final Inspection) cycles, so no isMain gate needed —
-                  every video here gets a comments thread.  Keyed by
-                  part_code so part-code search surfaces the same notes.
-                  2026-05-23 — Hidden in fullscreen mode (YouTube style).
-                  2026-05-27 — Operator: "remarks ka option sab part me
-                  lga".  Removed the `videoModal.part_code` gate so the
-                  panel renders for every cycle, even when the scanner
-                  hasn't populated a part_code (test pattern, scanner
-                  failure, etc.).  Falls back to `cycle_<seq>` as the
-                  storage key so each cycle still has a stable address. */}
               {!videoExpanded && (
                 <FsCycleCommentsPanel
                   lineId={lineId}
@@ -5273,11 +4973,6 @@ export default function Management2() {
           grid: rows = hourly slots, columns = loss buckets, cells =
           minutes spent in that loss type during that slot.  Plus a
           totals row matching the panel's shift-wide values. */}
-      {/* 2026-05-21 — NG LIST MODAL.  Triggered by clicking the NG
-          count cell in the slot table.  Renders a table of all NG
-          parts in that slot with per-row editable leader remark. */}
-      {/* 2026-05-22 — Loss-Remark editor.  Pops up over the Hourly
-          Loss Breakup modal when production clicks a loss-time cell. */}
       {lossRemarkModal && (
         <LossRemarkModal
           lineId={lineId}
@@ -5395,10 +5090,6 @@ export default function Management2() {
                   <tbody>
                     {lossBreakup.slots.map((s, i) => (
                       <tr key={i} style={{borderBottom:`1px solid ${border}`}}>
-                        {/* 2026-05-22 — Removed duplicate small "HH:MM – HH:MM"
-                            line below slot_label.  slot_label already encodes
-                            the range (e.g. "08:30-09:30") so the second line
-                            was visual noise. */}
                         <td style={{padding:"8px 12px",fontWeight:700,color:text,whiteSpace:"nowrap",
                                     position:"sticky",left:0,background:bgCard}}>
                           {s.slot_label}
@@ -5944,9 +5635,6 @@ export default function Management2() {
                                             since {fmtClock(ep.start_at)}
                                           </span>
                                         )}
-                                        {/* Raw detection count (×N) removed per operator
-                                            request 2026-05-16 — duration already tells the
-                                            story; hit_count was just polling noise. */}
                                       </div>
                                     );
                                   })}
@@ -6046,16 +5734,6 @@ export default function Management2() {
         );
       })()}
 
-      {/* ── SENSOR STATUS MODAL — ALL SENSORS for current model ─
-          2026-05-13 (v2) — operator updated spec:
-            "saare sensors jo uss model mein work krta hai unka
-             status dikhe like they are working or not"
-          So the modal now shows EVERY sensor configured for the
-          currently-running model with a clear green/red status pill.
-          Stuck (desensed) rows appear first in red with last-toggle
-          time + how long they've been stuck.  Working (sensing) rows
-          appear below in green.
-          Auto-refreshes every 10 s with the parent's sensor poll. */}
       {sensorModalOpen && (() => {
         const entries = sensorSweep?.entries || [];
         const stuck   = entries.filter(s => (s.status || "").toLowerCase() === "stuck");
@@ -6158,10 +5836,6 @@ export default function Management2() {
                 </button>
               </div>
 
-              {/* Body — full list of every configured sensor with
-                  status pill.  Stuck rows first (red bg), then working
-                  rows (default bg) — operator can scan top-to-bottom
-                  and act on the red ones first. */}
               {entries.length === 0 ? (
                 <div style={{padding:"56px 0",textAlign:"center",color:textMut,fontStyle:"italic"}}>
                   Waiting for sensor sweep from collector…
@@ -6618,11 +6292,6 @@ function FsNgDetailsPanel({ lineId, partCode, border, text, textSub, textMut, bg
         <div style={{ color: textMut, fontSize: 12, padding: "6px 0" }}>Loading Alarm details…</div>
       ) : (
         <>
-          {/* 2026-05-24 — "Machine-detected reason" section removed.
-              Operator: "ye tujhe kisne btya ki ye part itne ct se upr
-              gya to ng h, khud se kuch bhi bna rha h kya tu".  Auto-
-              guess based on CT vs ideal is meaningless — slow cycle
-              isn't always NG.  Only L109 + operator remarks define NG. */}
 
           {/* ───── Line leader remark (manual, editable) ───── */}
           <div>
@@ -6997,11 +6666,6 @@ function NgListModal({ lineId, idealCt, date, slotLabel, onClose, onPlayVideo, b
                                 fontWeight: 800, fontSize: 10, color: textSub,
                                 textTransform: "uppercase",
                                 width: 60 }}>Video</th>
-                  {/* 2026-05-26 — "Machine Alarm" column kept as a
-                      placeholder.  Operator will populate it from a
-                      future PY-style alarm-name config; auto "CT vs
-                      ideal" guess removed because CT has NO relation
-                      to NG (a slow cycle is not necessarily NG). */}
                   <th style={{ padding: "8px 6px", textAlign: "left",
                                 fontWeight: 800, fontSize: 10, color: textSub,
                                 textTransform: "uppercase" }}>Machine Alarm</th>
@@ -7053,10 +6717,6 @@ function NgListModal({ lineId, idealCt, date, slotLabel, onClose, onPlayVideo, b
                           ▶
                         </button>
                       </td>
-                      {/* 2026-05-26 — Machine Alarm cell: empty
-                          placeholder until PY-style alarm-name config
-                          is wired in.  CT has NO relation to NG so we
-                          never auto-fill this from cycle data. */}
                       <td style={{ padding: "8px 6px", fontSize: 11,
                                     color: textMut, lineHeight: 1.4,
                                     fontStyle: "italic" }}>

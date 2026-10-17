@@ -485,16 +485,6 @@ function OtModal({ data, metric, setMetric, machineName, onClose, D, otCycles, o
             </span>
           </span>
 
-          {/* 2026-08-07 — TOTAL LOSS, dead-centre of this popup's header.
-              Same figure and formatting the header pill used to carry; it now
-              lives only here.  `lossSeconds` is a live prop off the 8-second
-              wallboard poll, so this keeps ticking while the popup is open. */}
-          {/* 2026-08-11 — operator spec: on FINAL INSPECTION this popup lists
-              EVERY machine's own gain/loss side by side ("sabka alag alag"),
-              not one combined figure — the per-machine numbers are the point,
-              and a sum of machines that run in parallel would not mean much
-              anyway.  Every other machine's popup keeps the single centred
-              figure it already had.  Both tick live off the 8 s poll. */}
           {(() => {
             const p    = (n) => String(n).padStart(2, "0");
             const hms  = (v) => {
@@ -545,10 +535,6 @@ function OtModal({ data, metric, setMetric, machineName, onClose, D, otCycles, o
                 position: "absolute", left: "50%", top: "50%",
                 transform: "translate(-50%, -50%)", pointerEvents: "none",
               }}>
-                {/* 2026-08-14 — labelled "Speed", not "Total".  The number has
-                    always been SUM(ct − ideal) over the running cycles — a pure
-                    speed figure — but calling it "Total Loss" read as though it
-                    included breakdown / setup / quality time, which it never did. */}
                 {chip(Number(lossSeconds) < 0 ? "Speed Gain" : "Speed Loss", lossSeconds, true)}
               </div>
             );
@@ -953,17 +939,8 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
           </span>
         </div>
 
-        {/* 2026-08-07 — the Total Loss pill used to sit here, centred in the
-            header.  Operator moved it INSIDE the OVER TARGET popup ("uske
-            andar center mein aaye"), so the graph header is back to just
-            name + OK/NG.  The figure itself is unchanged — see `lossSec`
-            above and the pill in OtModal. */}
-
         <div style={{ display: "flex", gap: 10, alignItems: "center",
                       flexShrink: 0 }}>
-          {/* 2026-05-24 — Show OK + NG counts separately so operator
-              can see per-machine reject rate at a glance.  NG count
-              shown in red, OK in green. */}
           {(() => {
             const _okCy = allCycles.filter(c => !c.is_ng);
             const _ngCy = allCycles.filter(c => c.is_ng);
@@ -1006,13 +983,6 @@ function MachineRow({ machine, idealCt, onPick, onCycleVideo, isMain = false, lo
       <div style={{ flex: 1, minHeight: 0, position: "relative",
                     padding: "2px 4px 0" }}>
         <canvas ref={canvasRef} style={{ width: "100%", height: "100%" }} />
-        {/* 2026-06-01 — "Over target" QTY badge.  Operator: graph ke side
-            me dikhao kitne CT target (ideal) se upar gaye.  Absolute overlay
-            in the top-right corner so the chart width stays unchanged.
-            Counts ALL cycles this shift (OK + NG) whose ct > ideal.  Amber =
-            slow-warning, NOT reject-red.  Display-only: reads allCycles that
-            is already loaded for the graph — no API / collector / DB touch.
-            pointerEvents:none so dot-tap (video) + panel-open pass through. */}
         {(() => {
           const over  = allCycles.filter(c => c.ct != null && c.ct > idealCt).length;
           const _allMax = allCycles.length ? Math.max(...allCycles.map(c => Number(c.cycle_seq) || 0)) : 0;
@@ -1482,13 +1452,7 @@ export default function WallboardLeft() {
       transformOrigin: needsRotation ? "top left" : undefined,
       transform: needsRotation ? "rotate(90deg)" : undefined,
     }}>
-      {/* Slide-nav menu — portaled to <body> so it escapes this wrapper's
-          rotate() transform (a transformed ancestor breaks position:fixed).
-          Trigger hidden; opened by the header-logo click below via the
-          "tbdi:open-nav" window event. */}
       {createPortal(<SlideNav hideTrigger raise />, document.body)}
-      {/* 2026-10-08 — pending breakdown slips list (header B/D SLIPS pill).
-          Portal for the same reason as SlideNav: the wall may be rotated. */}
       {bdOpen && createPortal((() => {
         const slips = bdPend?.slips || [];
         const fmtAge = (m) => m == null ? "—"
@@ -1566,13 +1530,6 @@ export default function WallboardLeft() {
           </div>
         );
       })(), document.body)}
-      {/* Header bar — 2026-05-18-r13 — Rebuilt to match Fullscreen.jsx
-          header style (operator spec: "second screenshot wale me
-          light dark ka option nhi aaya or ye line 2 kya h same head
-          kr de ye last wale screenshot jaisa").  Adds: line name +
-          date, RUNNING status pill, Final Inspection pill, model
-          info, live indicator, LIGHT/DARK toggle.  Flex-wraps onto
-          two rows when narrow (same trick we use in Fullscreen).   */}
       <div style={{
         minHeight: 50, padding: "4px 14px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -1590,9 +1547,6 @@ export default function WallboardLeft() {
                           objectFit: "contain", cursor: "pointer",
                           background: "#fff", padding: 3, flexShrink: 0 }} />
           <div style={{ minWidth: 0, position: "relative" }}>
-            {/* 2026-09-13 — Loop Pipe lines only: line-NAME becomes a dropdown to
-                switch between Loop Pipe lines (keeps the Supervisor view). Every
-                other line keeps the plain, non-clickable name. */}
             {loopLines.length > 0 ? (
               <div
                 onClick={() => setLoopMenuOpen(o => !o)}
@@ -1707,7 +1661,6 @@ export default function WallboardLeft() {
             );
           })()}
 
-          {/* 2026-10-08 — pending breakdown slips of this line; click = list */}
           {bdPend && (() => {
             const n = bdPend.count || 0;
             const late = (bdPend.slips || []).filter(s => s.locked).length;
@@ -1726,14 +1679,6 @@ export default function WallboardLeft() {
               </button>
             );
           })()}
-
-          {/* 2026-05-18-r14 — "MACHINE Final Inspection" pill removed
-              per operator spec: "ye final inspection kha se aa gyi".
-              The wallboard view shows ALL machines simultaneously, so
-              labelling the HEADER with one specific machine name was
-              misleading.  Final Inspection still tags its own chart
-              row (the star ★ row at the top) — the header just shows
-              line + shift + status + model now.                       */}
 
           {/* Model pill — muted grey w/ accent for model name */}
           {summary?.kpi?.current_model_name && (
@@ -1754,12 +1699,6 @@ export default function WallboardLeft() {
             </span>
           )}
 
-          {/* 2026-08-12 — jump to the MANAGEMENT view of this same line.  Mirror
-              of the "Go to Supervisor" button on that screen, so the pair can be
-              swapped from either side without editing the URL.  Sits after the
-              MODEL pill so the identity of the line reads first and the action
-              last.  Uses the line NAME (/Y17-SS/MANAGEMENT) to match the
-              readable URL scheme. */}
           <button
             onClick={() => {
               const ref = String(summary?.kpi?.line_name || lineId || lineRef)
@@ -1797,16 +1736,9 @@ export default function WallboardLeft() {
           {/* Clock */}
           <span style={{ fontSize: 14, fontFamily: "monospace",
                           fontWeight: 700, color: text, letterSpacing: ".04em" }}>
-            {/* 2026-09-14 — manual HH:MM:SS: toLocaleTimeString wrapped the time in
-                invisible directional marks that showed as stray white dashes on
-                the panel's WebView. */}
             {`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`}
           </span>
 
-          {/* 2026-05-18-r13 — LIGHT/DARK toggle.  No actual theme
-              refactor of the chart rows yet (they stay dark for
-              operator-eye comfort on the 65" TV) — but the button is
-              wired so a future swap is one localStorage flip away. */}
           <button onClick={() => {
                     const next = D ? "light" : "dark";
                     try { localStorage.setItem("wb_theme", next); } catch {}
@@ -1888,27 +1820,8 @@ export default function WallboardLeft() {
           ))}
         </div>
 
-        {/* 2026-05-18-r5 — Hourly-panel rendering removed.  Operator spec:
-            "CLICK TO HOURLY HTA DE AB VIDEO AAYEGI HR CYCLE KI".  Row-level
-            clicks no longer open the per-machine slot panel; chart dots
-            now own the click event and open the cycle-video popup instead.
-            The HourlyPanel component is left defined above as dead code
-            in case the slot view is wanted back later — easy to re-enable
-            by restoring onPick / pickedMachine wiring. */}
       </div>
 
-      {/* ── PER-CYCLE VIDEO POPUP ───────────────────────────────────
-          Triggered by clicking any dot on any machine's CT chart.
-          Streams from the line's /cycle-video proxy (main line) or
-          /api/submachines/{id}/cycle-video (sub machines).
-
-          2026-05-18-r7 — Portal'd to document.body to escape the
-          rotated dashboard's transform-ancestor containing block.
-          2026-05-19 — REVERTED r17.  Popup is now ALWAYS landscape
-          (upright relative to the physical monitor).  overlayPosStyle
-          is plain `position:fixed; inset:0`; combined with the Portal
-          escape, the popup covers the natural viewport regardless of
-          dashboard rotation state.                                 */}
       {videoCycle && createPortal((
         <div
           onClick={closeVideo}
@@ -1975,37 +1888,6 @@ export default function WallboardLeft() {
                 ×
               </button>
             </div>
-            {/* Video element — `controls` for play/pause, auto-loads.
-                If the server returns 404 / 401, the browser fires onError.
-
-                2026-05-19 — Auto-retry on error.  Diagnosis from operator
-                log: when the operator clicks a freshly-finished cycle dot,
-                the cycle's MP4 is still being extracted by the recorder
-                (10-20 s for long cycles).  The first /cycle-video proxy
-                hit returns 404 because the MP4 isn't on disk yet, the
-                browser fires `error`, and we'd show "No video available"
-                forever even though the file would arrive a few seconds
-                later.
-
-                New behavior: on error, retry the load up to RETRY_MAX
-                times at RETRY_DELAY_MS spacing (5 s × 4 = 20 s coverage,
-                comfortably wider than any observed extraction).  Each
-                retry uses a fresh cache-buster so the browser doesn't
-                serve the cached 404 / partial response.  Only after the
-                retry budget is exhausted do we show the inline error. */}
-            {/* 2026-05-21 — Video loops continuously until operator
-                explicitly closes the modal.  Custom big centered
-                play/pause overlay button on top of native controls —
-                operator on shop-floor with gloves can hit a 96 px
-                target much easier than the native <30 px controls.
-                Spec: "video chale to continue chale jb tk close na ho
-                ... play button center me bda".
-                2026-05-21-r2 — Operator added "timeline bar wapas
-                laa + replay-from-beginning button".  Re-enabled
-                `controls` for the native progress/scrubber bar at the
-                bottom; added a custom ↺ Replay button (top-left of
-                video) that resets currentTime=0 instantly without
-                waiting for the natural loop boundary. */}
             <div style={{ position:"relative", width:"100%", lineHeight:0 }}>
             <video ref={vidRef} src={videoCycle.url}
                    muted
@@ -2130,14 +2012,6 @@ export default function WallboardLeft() {
                    }} />
             {/* always-visible progress + time (native strip fades out) */}
             <VideoProgressBar videoRef={vidRef} />
-            {/* 2026-08-10 — Smooth "clip loading" cover.
-                A cycle clip is rendered on demand server-side, so the first
-                2-4 s show a black box with the browser's own round spinner —
-                operator read that as a hang ("gol gol buffer acha nhi lg
-                rha").  This covers it with a calm shimmer + film icon + a
-                progress bar that goes determinate as soon as the media
-                element reports buffered bytes.  pointerEvents:none so the
-                ↺ button and tap-to-play underneath still work. */}
             {vidLoading && (
               <div style={{
                 position:"absolute", inset:0, zIndex:5, borderRadius:6,
@@ -2176,12 +2050,6 @@ export default function WallboardLeft() {
                 </div>
               </div>
             )}
-            {/* 2026-08-10 — Mid-clip re-buffer.  Playback now starts at 20%
-                so a slow moment can briefly run the buffer dry.  Keep the
-                frame visible (translucent scrim, no icon) and just show a
-                moving strip — enough to hide the browser's round spinner
-                without the video "disappearing" mid-cycle.  Auto-clears on
-                the next `playing` event; nothing to click. */}
             {vidStall && !vidLoading && (
               <div style={{
                 position:"absolute", inset:0, zIndex:5, borderRadius:6,
@@ -2204,16 +2072,6 @@ export default function WallboardLeft() {
                 </div>
               </div>
             )}
-            {/* 2026-05-22 — Center big-play overlay removed per operator
-                request.  Native controls bottom strip + ↺ replay top-left
-                cover the play/pause/seek workflow. */}
-            {/* 2026-05-21-r2 — Replay-from-start button.  Operator spec:
-                "replay from beginning ka bhi button aana chahiye".
-                Sits in the top-left corner of the video, 40 px circle.
-                Always visible (unlike big-play which hides during
-                playback) so operator can re-watch any cycle instantly
-                without waiting for the natural loop boundary or
-                dragging the native scrubber to 0. */}
             <button
               className="wb-replay"
               title="Replay from start"
@@ -2249,13 +2107,6 @@ export default function WallboardLeft() {
               </svg>
             </button>
             </div>
-            {/* 2026-05-21 — Per-cycle Comments panel.
-                Operator spec: "Final Inspection ka video khule to neeche
-                comments tab ho jaha cycle-specific notes likhe ja sake".
-                Renders ONLY for main-PLC cycles (isMain) — sub-machine
-                slice viewers don't need this.  Keyed by part_code so
-                opening the same cycle via part_code search later shows
-                the same comment history. */}
             {videoCycle.isMain && (
               <CycleCommentsPanel
                 lineId={lineId}
@@ -2268,16 +2119,6 @@ export default function WallboardLeft() {
                 textMut={textMut}
               />
             )}
-            {/* 2026-05-24 — Per-process NG remarks panel for ANY NG
-                cycle (main OR sub).  Sub-machine cycles don't have a
-                real part_code, so we synthesise one as
-                M{machine_id}-{cycle_seq}-{YYYY-MM-DD} for keying.
-                Operator spec: "ng part me video k niche remarks ka
-                option de hr process pe". */}
-            {/* 2026-06-05 — MAIN machine ka per-machine remark (ng-process-remarks)
-                hata diya: Final / YNC-SS ke liye ab sirf upar wala CycleCommentsPanel
-                (cycles/comments, part_code-keyed) jo dono views me sync hota hai.
-                Yeh box ab sirf SUB machines ke liye (unka apna alag remark system). */}
             {!videoCycle.isMain && (() => {
               const realPC = videoCycle.cy.part_code;
               const machineId = videoCycle.machine.id
