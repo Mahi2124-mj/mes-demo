@@ -2862,7 +2862,7 @@ export default function Management2() {
         display:"grid",
         gridTemplateColumns: isPortrait ? "1fr 200px 185px" : "1fr 285px",
         gridTemplateRows:    isPortrait
-          ? `minmax(50px, auto) 205px 1fr auto auto auto`
+          ? `minmax(50px, auto) 205px 1.28fr auto auto 2.2fr`      // CT graph | CT distribution ~500 px on 1080x1920
           : "minmax(50px, auto) 1fr auto auto",
         gap:6, padding:6,
         paddingTop: gapShift ? 40 : 6,

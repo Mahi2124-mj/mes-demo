@@ -7,6 +7,8 @@
 //   <DocViewer>     full-screen popup: document tabs, sheet tabs, ‹ › paging, Fit / 100 % zoom, PDF,
 //                   ✕ on the sheet's top-right corner
 import { useEffect, useRef, useState } from "react";
+
+const SHEETS_RATIO = 2.15;   // width : height of the card's sheets (Track Record upright + 2 x 2 landscape)
 import { createPortal } from "react-dom";
 
 const page = (key, n, label, w, h) => ({ src: `/docs/${key}-${n}.png`, thumb: `/docs/${key}-${n}.thumb.png`, label, w, h });
@@ -141,6 +143,16 @@ export function DocViewer({ start = 0, onClose }) {
 // ─── Card (portrait layout): Track Record upright on the left, 2 x 2 landscape sheets beside it ───
 export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
   const [open, setOpen] = useState(null);
+  const boxRef = useRef(null);
+  const [box, setBox] = useState(null);
+  useEffect(() => {
+    const el = boxRef.current;
+    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // as large as the card allows, keeping the sheets' shape
+  const fitW = box && box.h > 0 ? Math.min(box.w, box.h * SHEETS_RATIO) : null;
   const tile = (d, i, big) => (
     <button key={d.key} type="button" onClick={() => setOpen(i)} title={`Open ${d.label}`}
       style={{ cursor: "pointer", minWidth: 0, minHeight: 0, width: "100%", height: "100%", display: "flex",
@@ -174,13 +186,15 @@ export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
                      color: textMut, fontSize: 10, fontWeight: 800, padding: "2px 8px" }}>📄 Open all</button>
         </span>
       </div>
-      {/* Height follows the width (aspect-ratio): the upright sheet (1600 x 1872) is as tall as two rows of
-          landscape sheets (~1.48 : 1), so 1.24fr : 1fr : 1fr columns fill the cells without empty bands. */}
-      <div style={{ aspectRatio: "2.15 / 1", display: "grid", gap: 10, padding: 8,
-                    gridTemplateColumns: "minmax(0, 1.24fr) minmax(0, 1fr) minmax(0, 1fr)",
-                    gridTemplateRows: "repeat(2, minmax(0, 1fr))" }}>
-        <div style={{ gridRow: "1 / span 2", minWidth: 0, minHeight: 0 }}>{tile(upright, 0, true)}</div>
-        {rest.map((d, k) => tile(d, k + 1))}
+      {/* The upright sheet (1600 x 1872) is as tall as two rows of landscape sheets (~1.48 : 1), so
+          1.24fr : 1fr : 1fr columns at SHEETS_RATIO fill the cells; centred in the card. */}
+      <div ref={boxRef} style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: fitW ?? "100%", aspectRatio: `${SHEETS_RATIO} / 1`, display: "grid", gap: 10, padding: 8,
+                      gridTemplateColumns: "minmax(0, 1.24fr) minmax(0, 1fr) minmax(0, 1fr)",
+                      gridTemplateRows: "repeat(2, minmax(0, 1fr))" }}>
+          <div style={{ gridRow: "1 / span 2", minWidth: 0, minHeight: 0 }}>{tile(upright, 0, true)}</div>
+          {rest.map((d, k) => tile(d, k + 1))}
+        </div>
       </div>
       {open != null && <DocViewer start={open} onClose={() => setOpen(null)} />}
     </div>
