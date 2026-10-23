@@ -352,6 +352,9 @@ class Camera:
         """Collector hook: queue the clip for this cycle (cut once its last second is on disk). Queued
         whenever recording is on, also while ffmpeg is reconnecting: the cut uses what was recorded."""
         if not (self.info.get("recording") or self._wants_recording()):
+            # remember why, as it was at the cycle (the settings may change later)
+            self._clip_state(seq, "none", reason="ffmpeg is not installed on the server PC" if not self.ffmpeg
+                             else "Camera Recording was OFF (Camera page)")
             return
         cfg = self.get_cfg()
         pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)

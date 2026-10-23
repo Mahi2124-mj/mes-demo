@@ -109,6 +109,10 @@ The server PC must be on the machine network (192.168.30.x).
   0 s) is cut frame-accurately and re-encoded to H.264 into `clips/live/cycle_<seq>.mp4`, so the clip
   is as long as the cycle time; MANAGEMENT-2 plays it like the recorded clips.
 - Recording OFF: no clips; the preview opens the stream only while someone is watching.
+- Every cycle gets a clip while recording is on, also when the camera is reconnecting at that moment
+  (the clip then has what was recorded). A failed cut is retried once; two clips can be cut at a time.
+  No clip yet: the popup says why (still being saved — it opens by itself, failed + reason, or the
+  camera was not recording / Recording was OFF) instead of a "can't decode" message.
 - Without ffmpeg: the preview falls back to the camera's HTTP snapshot (`/ISAPI/.../picture` or `/cgi-bin/camera`), no clips.
 - Live preview: Camera page → Preview → Live, or the 📷 CAMERA button on MANAGEMENT-2.
 
