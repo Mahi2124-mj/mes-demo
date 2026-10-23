@@ -726,7 +726,8 @@ def collector_view():
     cfg = machine_cfg()
     recent = []
     for c in reversed(cyc[-25:]):
-        recent.append({**c, "clip": CAMERA.clip_path(c["cycle_seq"]) is not None})
+        has = CAMERA.clip_path(c["cycle_seq"]) is not None
+        recent.append({**c, "clip": has, **({} if has else {"clip_status": CAMERA.clip_status(c["cycle_seq"])})})
     cfg = {**cfg, **(COLLECTOR.override or {})}      # demo run: show the demo PLC's address
     return {
         "plc": {**COLLECTOR.snapshot(), "plc_ip": cfg.get("plc_ip"), "plc_port": cfg.get("plc_port"),
@@ -1004,8 +1005,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._json({"detail": "cycle_seq required"}, 400)
             full = CAMERA.clip_path(seq)
-            if not full:
-                return self._json({"detail": "No clip for this cycle"}, 404)
+            if not full:                     # why: still being saved, failed, or never recorded
+                return self._json({"detail": "No clip for this cycle", **CAMERA.clip_status(seq)}, 404)
             return self._file(full, cache="private, max-age=86400", extra={"X-Clip-Source": "archive", "X-Video-Offset": "0"})
         if tail == "comments-history":
             return self._json(comments_history())

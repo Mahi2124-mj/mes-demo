@@ -1176,6 +1176,37 @@ export default function Management2() {
     } catch { vidSrcRef.current = null; }
   }, []);
 
+  // A clip that is still being saved: check every 2 s and play it as soon as it is there.
+  const waitClip = videoModal?._waitClip;
+  useEffect(() => {
+    if (!waitClip) return undefined;
+    let alive = true, timer = null, tries = 0;
+    const done = (patch) => setVideoModal(m => (m && m._waitClip === waitClip ? { ...m, _waitClip: null, ...patch } : m));
+    const tick = async () => {
+      tries += 1;
+      try {
+        const r = await fetch(waitClip + "&w=" + Date.now(), { headers: { Range: "bytes=0-0" } });
+        if (!alive) return;
+        if (r.ok) {
+          try { if (r.body) r.body.cancel(); } catch { /* noop */ }
+          done({ error: null, _retries: 0, video_url: waitClip + "&r=" + Date.now() });
+          return;
+        }
+        const j = r.status === 404 ? await r.json().catch(() => ({})) : {};
+        if (!alive) return;
+        if (j.state && j.state !== "queued" && j.state !== "cutting") {
+          done({ error: `📷 No video for this cycle: ${j.reason || "not recorded"}` });
+          return;
+        }
+      } catch { /* server busy: try again */ }
+      if (!alive) return;
+      if (tries >= 150) { done({ error: "📷 The video for this cycle was not saved" }); return; }
+      timer = setTimeout(tick, 2000);
+    };
+    timer = setTimeout(tick, 1500);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [waitClip]); // eslint-disable-line
+
   const openCycleVideo = useCallback((cy) => {
     if (!cy || cy.ct_value == null) return;
     const pc = String(cy.part_code || "")
@@ -4776,8 +4807,21 @@ export default function Management2() {
                     fetch(src, { method: "GET", headers: { Range: "bytes=0-0" }, signal: _errCtrl.signal })
                       .then(r => {
                         clearTimeout(_errTmo);
+                        if (r.status === 404) return r.json().catch(() => ({})).then(j => ({ r, j }));
                         try { if (r.body) r.body.cancel(); } catch { /* noop */ }
-                        if (r.status === 503) {
+                        return { r, j: null };
+                      })
+                      .then(({ r, j }) => {
+                        if (r.status === 404 && j && j.state) {
+                          // Live clips: the server says why there is no file yet.
+                          const saving = j.state === "queued" || j.state === "cutting";
+                          setVideoModal(m => m ? {
+                            ...m, video_url: null, _lastUrl: null,
+                            _waitClip: saving ? src : null,
+                            error: saving ? "⏳ This cycle's video is still being saved. It opens by itself."
+                                          : `📷 No video for this cycle: ${j.reason || "not recorded"}`,
+                          } : m);
+                        } else if (r.status === 503) {
                           setVideoModal(m => m ? {
                             ...m,
                             video_url: null,

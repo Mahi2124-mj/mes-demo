@@ -165,6 +165,7 @@ class Camera:
         self.run_codec = {}                  # recording run -> video codec the camera sends (h264, hevc, ...)
         self.need_duration = set()           # clips without a cycle_<seq>.json yet
         self.clip_window = {}                # clip -> its start/end, kept while its length can't be read
+        self.clip_states = {}                # seq -> {"state": queued | cutting | failed, "reason", "start"} until saved
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
                      "last_clip_error": None, "source": None, "camera_codec": None}
@@ -249,7 +250,9 @@ class Camera:
 
     # ----- public -----
     def start(self):
-        for target, name in ((self._supervise, "cam-supervisor"), (self._clipper, "cam-clipper"),
+        # two clip workers: a long cycle being re-encoded does not hold up the next clips
+        for target, name in ((self._supervise, "cam-supervisor"), (self._clipper, "cam-clipper-1"),
+                             (self._clipper, "cam-clipper-2"),
                              (self._janitor, "cam-janitor"), (self._snapshots, "cam-snapshot"),
                              (self._watch_segments, "cam-segments"), (self._measure_old_clips, "cam-durations")):
             threading.Thread(target=target, name=name, daemon=True).start()
@@ -273,6 +276,20 @@ class Camera:
         mine = [t for t in self.seg_seen.values() if t >= self.launches[-1]]
         return min(mine) if mine else None
 
+    def clip_status(self, seq):
+        """Why a cycle has no clip yet: {"state": "queued" | "cutting" | "failed" | "none", "reason"}."""
+        with self.lock:
+            st = self.clip_states.get(int(seq))
+        if st:
+            return {"state": st["state"], "reason": st["reason"]}
+        if not self.ffmpeg:
+            reason = "ffmpeg is not installed on the server PC"
+        elif not self._wants_recording():
+            reason = "Camera Recording is OFF (Camera page)"
+        else:
+            reason = "the camera was not recording during this cycle"
+        return {"state": "none", "reason": reason}
+
     def reset_clips(self):
         """Drop queued clips and delete every live cycle clip (cycle numbers restart)."""
         while True:
@@ -280,6 +297,8 @@ class Camera:
                 self.clips.get_nowait()
             except queue.Empty:
                 break
+        with self.lock:
+            self.clip_states.clear()
         for root in {self.clips_root(), self.default_clips_dir}:
             d = os.path.join(root, "live")
             try:
@@ -330,12 +349,34 @@ class Camera:
             return None, after_no
 
     def on_cycle(self, seq, start, end):
-        """Collector hook: queue the clip for this cycle (cut once its last second is on disk)."""
-        if self.info.get("recording"):
-            cfg = self.get_cfg()
-            pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
-            start = max(start, end - dt.timedelta(seconds=MAX_CLIP_S))
-            self.clips.put((seq, start - dt.timedelta(seconds=pre), end + dt.timedelta(seconds=post)))
+        """Collector hook: queue the clip for this cycle (cut once its last second is on disk). Queued
+        whenever recording is on, also while ffmpeg is reconnecting: the cut uses what was recorded."""
+        if not (self.info.get("recording") or self._wants_recording()):
+            return
+        cfg = self.get_cfg()
+        pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
+        start = max(start, end - dt.timedelta(seconds=MAX_CLIP_S)) - dt.timedelta(seconds=pre)
+        self._clip_state(seq, "queued", start=start)
+        self.clips.put((seq, start, end + dt.timedelta(seconds=post), 0, 0.0))
+
+    def _wants_recording(self):
+        cfg = self.get_cfg()
+        ip = "demo" if self.demo == "synthetic" else str(cfg.get("ip") or "").strip()
+        return (bool(cfg.get("recording_enabled")) or bool(self.demo)) and bool(ip) and bool(self.ffmpeg)
+
+    def _clip_state(self, seq, state, reason=None, start=None):
+        with self.lock:
+            if state is None:
+                self.clip_states.pop(seq, None)
+                return
+            start = start or (self.clip_states.get(seq) or {}).get("start")
+            self.clip_states[seq] = {"state": state, "reason": reason, "start": start}
+            while len(self.clip_states) > 500:            # keep the newest cycles only
+                self.clip_states.pop(next(iter(self.clip_states)))
+
+    def _count(self, key):
+        with self.lock:
+            self.info[key] = self.info.get(key, 0) + 1
 
     # ----- internals -----
     def _set(self, **kw):
@@ -377,7 +418,7 @@ class Camera:
         while True:
             cfg = self.get_cfg()
             ip = "demo" if self.demo == "synthetic" else str(cfg.get("ip") or "").strip()
-            record = (bool(cfg.get("recording_enabled")) or bool(self.demo)) and bool(ip) and bool(self.ffmpeg)
+            record = self._wants_recording()
             want = "record" if record else ("preview" if ip and self.ffmpeg and self._want_preview() else None)
             running = self.proc is not None and self.proc.poll() is None
 
@@ -556,15 +597,24 @@ class Camera:
 
     def _clipper(self):
         while True:
-            seq, start, end = self.clips.get()
-            wait = (end - dt.datetime.now()).total_seconds() + LATENCY_S + 1.5
+            seq, start, end, attempt, not_before = self.clips.get()
+            wait = max((end - dt.datetime.now()).total_seconds() + LATENCY_S + 1.5, not_before - time.time())
             if wait > 0:
                 time.sleep(wait)
+            self._clip_state(seq, "cutting")
             try:
                 self._cut(seq, start, end)
-                self._set(clips_cut=self.info["clips_cut"] + 1, last_clip=seq, last_clip_error=None)
+                self._clip_state(seq, None)
+                self._count("clips_cut")
+                self._set(last_clip=seq, last_clip_error=None)
             except Exception as e:  # noqa: BLE001
-                self._set(clips_failed=self.info["clips_failed"] + 1, last_clip_error=f"cycle {seq}: {e}")
+                if attempt == 0:                     # e.g. the camera was reconnecting: try once more
+                    self._clip_state(seq, "queued", reason=f"retrying: {e}")
+                    self.clips.put((seq, start, end, 1, time.time() + 5))
+                    continue
+                self._clip_state(seq, "failed", reason=str(e))
+                self._count("clips_failed")
+                self._set(last_clip_error=f"cycle {seq}: {e}")
                 print(f"[camera] no clip for cycle {seq}: {e}", flush=True)
 
     def _cut(self, seq, start, end):
@@ -634,8 +684,11 @@ class Camera:
 
     def _clean(self):
         now = dt.datetime.now()
+        with self.lock:                      # segments a queued clip still needs are kept
+            pending = [st["start"] for st in self.clip_states.values() if st["state"] in ("queued", "cutting") and st["start"]]
+        keep_from = min(pending) - dt.timedelta(seconds=60) if pending else now
         for t0, name in self._segments()[:-2]:
-            if (now - t0).total_seconds() > KEEP_SEGMENTS_S:
+            if (now - t0).total_seconds() > KEEP_SEGMENTS_S and t0 < keep_from:
                 try:
                     os.remove(os.path.join(self.seg_dir(), name))
                 except OSError:

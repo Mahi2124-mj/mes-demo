@@ -412,7 +412,10 @@ export function CollectorLive({ dark = false }) {
                         style={{ padding: "2px 10px", borderRadius: 6, border: `1px solid ${c.border}`, background: c.deep, color: c.text, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
                         ▶ Play
                       </button>
-                    ) : <span style={{ fontSize: 11, color: c.mut }}>—</span>}
+                    ) : ["queued", "cutting"].includes(r.clip_status?.state)
+                      ? <span style={{ fontSize: 11, color: c.sub }} title={r.clip_status.reason || ""}>saving…</span>
+                      : <span style={{ fontSize: 11, color: r.clip_status?.state === "failed" ? "#dc2626" : c.mut }}
+                              title={r.clip_status?.reason || ""}>{r.clip_status?.state === "failed" ? "failed" : "—"}</span>}
                   </td>
                 </tr>
               ))}
