@@ -141,7 +141,7 @@ export function DocViewer({ start = 0, onClose }) {
 }
 
 // ─── Card (portrait layout): Track Record upright on the left, 2 x 2 landscape sheets beside it ───
-export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
+export default function DocSheetsRow({ card, hdr, lbl9, textMut, style, boxId, fixedHeight = false }) {
   const [open, setOpen] = useState(null);
   const boxRef = useRef(null);
   const [box, setBox] = useState(null);
@@ -151,8 +151,8 @@ export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // as large as the card allows, keeping the sheets' shape
-  const fitW = box && box.h > 0 ? Math.min(box.w, box.h * SHEETS_RATIO) : null;
+  // as large as the card allows, keeping the sheets' shape (a card of its own height: as wide as it is)
+  const fitW = fixedHeight && box && box.h > 0 ? Math.min(box.w, box.h * SHEETS_RATIO) : null;
   const tile = (d, i, big) => (
     <button key={d.key} type="button" onClick={() => setOpen(i)} title={`Open ${d.label}`}
       style={{ cursor: "pointer", minWidth: 0, minHeight: 0, width: "100%", height: "100%", display: "flex",
@@ -176,7 +176,7 @@ export default function DocSheetsRow({ card, hdr, lbl9, textMut, style }) {
   );
   const [upright, ...rest] = DOCS;
   return (
-    <div style={{ ...card(), display: "flex", flexDirection: "column", minHeight: 0, ...style }}>
+    <div data-box={boxId} style={{ ...card(), display: "flex", flexDirection: "column", minHeight: 0, ...style }}>
       <div style={hdr({ padding: "4px 10px" })}>
         <span style={lbl9}>Documents</span>
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>

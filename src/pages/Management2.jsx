@@ -9,6 +9,7 @@ import axios from "axios";
 import VideoProgressBar from "../components/VideoProgressBar";
 import SlideNav from "../components/SlideNav";
 import DocSheetsRow, { DocViewer } from "../components/DocSheets";
+import { LayoutPanel, useDashboardLayout } from "../components/LayoutPanel";
 import { CameraLive, CollectorLive, LiveModal } from "../components/LivePanels";
 
 const api = axios.create({ baseURL: "", timeout: 5000 });
@@ -201,7 +202,7 @@ function getStatusColor(st) {
 // are coloured green/amber/red by their CT value vs ideal, and the
 // global peak bucket is highlighted in yellow.  Total cycle count +
 // peak label are shown in the top-right corner.
-function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, textSub, D, chartReady }) {
+function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, textSub, D, chartReady, maxCt }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
 
@@ -215,9 +216,12 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
     // Axis to the slowest cycle (at least 40 s / 2x ideal, at most 6x ideal); wider buckets on a wide axis.
     const idCt   = Number(idealCt) > 0 ? Number(idealCt) : 15;
     const cts    = data.buckets.map(b => b.ct);
-    const MAX_CT = Math.ceil(Math.max(40, idCt * 2, Math.min(Math.max(...cts), idCt * 6)) / 5) * 5;
+    const MAX_CT = maxCt > 0 ? maxCt                            // ⚙ LAYOUT: fixed end of the axis
+                 : Math.ceil(Math.max(40, idCt * 2, Math.min(Math.max(...cts), idCt * 6)) / 5) * 5;
+    canvasRef.current.setAttribute("data-hist-axis", MAX_CT);
     const span   = MAX_CT - Math.min(...cts);
     const stepK  = span <= 60 ? 1 : span <= 150 ? 5 : 10;          // bucket width in 0.1 s
+    const tickS  = span <= 50 ? 5 : span <= 120 ? 10 : 20;          // a label every tickS seconds
     const keyOf  = ct => Math.floor(Math.round(ct * 10) / stepK) * stepK;
     const byCt = new Map();
     for (const b of data.buckets) if (b.ct <= MAX_CT) byCt.set(keyOf(b.ct), (byCt.get(keyOf(b.ct)) || 0) + b.count);
@@ -278,15 +282,14 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
               color: textMut, font: { size: 10, family: "monospace" },
               maxRotation: 0,
               autoSkip: false,
-              // Label every 5 s (5s, 10s, … 40s)
               callback(value) {
                 const v = parseFloat(this.getLabelForValue(value));
-                return Math.abs(v - Math.round(v)) < 0.05 && Math.round(v) % 5 === 0 ? `${Math.round(v)}s` : "";
+                return Math.abs(v - Math.round(v)) < 0.05 && Math.round(v) % tickS === 0 ? `${Math.round(v)}s` : "";
               },
             },
             grid: { color: c => {
               const v = parseFloat(labels[c.index]);
-              return Math.abs(v - Math.round(v)) < 0.05 && Math.round(v) % 5 === 0
+              return Math.abs(v - Math.round(v)) < 0.05 && Math.round(v) % tickS === 0
                 ? "rgba(128,128,128,0.12)" : "transparent";
             } },
           },
@@ -369,7 +372,7 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
     } else {
       chartRef.current = new window.Chart(canvasRef.current.getContext("2d"), cfg);
     }
-  }, [data, idealCt, chartReady]);
+  }, [data, idealCt, chartReady, maxCt]);
 
   useEffect(() => () => {
     if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
@@ -689,6 +692,11 @@ export default function Management2() {
       ? "portrait" : "landscape";
   const [orientation, setOrientation] = useState(_detectOrient);
   const isPortrait = orientation === "portrait";
+  // ⚙ LAYOUT: CT graph seconds and box sizes, saved on the server for every screen
+  const { lay, update: updateLay, saved: laySaved } = useDashboardLayout();
+  const [layoutOpen, setLayoutOpen] = useState(false);
+  const LP = lay.portrait, LL = lay.landscape;
+  const pxOrAuto = (v) => (v ? `${v}px` : "auto");
   const isLanPanel = (() => { try { return sessionStorage.getItem("tbdi_lan") === "1"; } catch { return false; } })();
 
   // Live viewport tracking — needed to compute `needsRotation` below.
@@ -2096,7 +2104,9 @@ export default function Management2() {
     const ptRadius = visSlice.map(cy => cy.is_ng ? 5 : 3);
     const ptHoverR = visSlice.map(cy => cy.is_ng ? 9 : 6);
 
-    const Y_CAP   = ctAxisMax(visSlice.map(cy => cy.ct_value), idealCT);
+    const Y_CAP   = lay.ct.max > 0 ? lay.ct.max : ctAxisMax(visSlice.map(cy => cy.ct_value), idealCT);
+    const Y_MIN   = Math.min(lay.ct.min || 0, Y_CAP - 5);
+    cmsChartRef.current.setAttribute("data-ct-axis", Y_CAP);
     const ptBorder  = visSlice.map(cy => cy.ct_value > Y_CAP
                                        ? "#ffffff"
                                        : (D2 ? "#060912" : "#ffffff"));
@@ -2287,7 +2297,7 @@ export default function Management2() {
         scales: {
           y: {
             beginAtZero: true,
-            min: 0,
+            min: Y_MIN,
             max: Y_CAP,
             grid:   { color: D2 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)", drawBorder: false },
             border: { display: false },
@@ -2305,7 +2315,7 @@ export default function Management2() {
       },
       plugins: [hourlySlotPlugin, cycleLabelsPlugin],
     });
-  }, [dark, chartMode, filteredCms, chartReady, cmsViewStart, isPortrait]); // eslint-disable-line
+  }, [dark, chartMode, filteredCms, chartReady, cmsViewStart, isPortrait, lay.ct.min, lay.ct.max]); // eslint-disable-line
 
   // ── Live rt update for fallback (when ct_log DB has no data yet) ─
   useEffect(() => {
@@ -2314,8 +2324,9 @@ export default function Management2() {
     const vals = [...ctData].reverse().filter(v => v !== null);
     if (!vals.length) return;
     const CT_TOL2 = 0.009;
-    const Y_CAP2 = ctAxisMax(vals, idealCT);
+    const Y_CAP2 = lay.ct.max > 0 ? lay.ct.max : ctAxisMax(vals, idealCT);
     cmsChartInst.current.options.scales.y.max = Y_CAP2;
+    cmsChartInst.current.options.scales.y.min = Math.min(lay.ct.min || 0, Y_CAP2 - 5);
     cmsChartInst.current.data.datasets[0].data =
       vals.map(v => v == null ? null : Math.min(v, Y_CAP2));
     cmsChartInst.current.data.datasets[0].pointBackgroundColor =
@@ -2860,10 +2871,11 @@ export default function Management2() {
         height:  needsRotation ? "100vw" : "100vh",
         width:   needsRotation ? "100vh" : "100%",
         display:"grid",
-        gridTemplateColumns: isPortrait ? "1fr 200px 185px" : "1fr 285px",
+        gridTemplateColumns: isPortrait ? `1fr ${LP.loss_w}px ${LP.side_w}px` : `1fr ${LL.side_w}px`,
+        // portrait rows: header, KPI band, CT graph | CT distribution, hourly, timeline, documents
         gridTemplateRows:    isPortrait
-          ? `minmax(50px, auto) 205px 1.1fr auto 1fr auto`      // CT row ~470 px on 1080x1920; spare height to the timeline
-          : "minmax(50px, auto) 1fr auto auto",
+          ? `minmax(50px, auto) ${LP.kpi_h}px ${LP.ct_h}fr ${pxOrAuto(LP.hourly_h)} ${LP.timeline_h}fr ${pxOrAuto(LP.docs_h)}`
+          : `minmax(50px, auto) 1fr ${pxOrAuto(LL.timeline_h)} ${pxOrAuto(LL.hourly_h)}`,
         gap:6, padding:6,
         paddingTop: gapShift ? 40 : 6,
         background:bg, color:text,
@@ -3190,6 +3202,12 @@ export default function Management2() {
               style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
               📄 DOCUMENTS
             </button>
+            <button onClick={()=>setLayoutOpen(o=>!o)} title="CT graph seconds and box sizes"
+              style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${layoutOpen?STATUS_CLR["SETUP"]:border}`,
+                background:layoutOpen?`${STATUS_CLR["SETUP"]}22`:bgDeep,color:layoutOpen?STATUS_CLR["SETUP"]:textSub,
+                cursor:"pointer",fontSize:11,fontWeight:700}}>
+              ⚙ LAYOUT
+            </button>
             <button onClick={()=>setDark(d=>!d)} style={{padding:"4px 10px",borderRadius:6,
               border:`1px solid ${border}`,background:bgDeep,color:textSub,cursor:"pointer",fontSize:11,fontWeight:700}}>
               {D?"☀ LIGHT":"🌙 DARK"}
@@ -3484,7 +3502,7 @@ export default function Management2() {
           ...(isPortrait
             ? { display: "contents" }
             : { display: "grid",
-                gridTemplateColumns: "1fr 215px",
+                gridTemplateColumns: `1fr ${LL.loss_w}px`,
                 gap: 6, flex: 1, minHeight: 0 }),
         }}>
 
@@ -3492,7 +3510,7 @@ export default function Management2() {
             <div style={{
               gridColumn: "1 / -1", gridRow: 3,
               display: "grid",
-              gridTemplateColumns: "3fr 2fr",   // demo page 2: CT graph 60 | CT Distribution 40
+              gridTemplateColumns: `${LP.ct_split}fr ${100 - LP.ct_split}fr`,   // CT graph | CT distribution
               gridTemplateRows: "1fr",
               gap: 6, minHeight: 0,
             }}>
@@ -3716,7 +3734,7 @@ export default function Management2() {
                   </span>
                 </div>
                 <div style={{flex:1, position:"relative", minHeight:0, padding:"4px 8px 2px"}}>
-                  <CtDistributionChart data={ctHistogram}
+                  <CtDistributionChart data={ctHistogram} maxCt={lay.ct.hist_max}
                                         idealCt={Number(rt?.cycle_time_plan || 15)}
                                         bgDeep={bgDeep}
                                         border={border}
@@ -3731,7 +3749,7 @@ export default function Management2() {
             )}
 
           {isPortrait && (
-            <DocSheetsRow card={card} hdr={hdr} lbl9={lbl9} textMut={textMut}
+            <DocSheetsRow card={card} hdr={hdr} lbl9={lbl9} textMut={textMut} boxId="docs" fixedHeight={!!LP.docs_h}
                           style={{ gridColumn: "1 / -1", gridRow: 6 }} />
           )}
 
@@ -3937,7 +3955,7 @@ export default function Management2() {
                   9:16: hidden here — rendered as its own card at row 4 of
                   the outer grid (see <CtDistributionChart …/> below). */}
               {chartMode === "histogram" && !isPortrait && (
-                <CtDistributionChart data={ctHistogram}
+                <CtDistributionChart data={ctHistogram} maxCt={lay.ct.hist_max}
                                       idealCt={Number(rt?.cycle_time_plan || 15)}
                                       bgDeep={bgDeep}
                                       border={border}
@@ -4248,9 +4266,9 @@ export default function Management2() {
             16:9: row 3 (after chart+side row 2).
             9:16: row 4 of the 5-row outer grid (r9 reduced from 6 to 5
                   rows when the quad panel absorbed the histogram). */}
-        <div style={{...card(),gridColumn:"1/-1",
+        <div data-box="timeline" style={{...card(),gridColumn:"1/-1",minHeight:0,
                       padding:"6px 12px",display:"flex",flexDirection:"column",gap:5,
-                      ...(isPortrait ? { gridRow: 5, minHeight: 0 } : {}),
+                      ...(isPortrait ? { gridRow: 5 } : {}),
                     }}>
 
           {/* Header */}
@@ -4278,7 +4296,7 @@ export default function Management2() {
           </div>
 
           {/* THE BAR — status-logged segments, no production math */}
-          <div style={{position:"relative",...(isPortrait ? { flex:1, minHeight:20 } : { height:20 }),
+          <div style={{position:"relative",...(isPortrait || LL.timeline_h ? { flex:1, minHeight:20 } : { height:20 }),
                        background:D?"#141e2e":"#e2e8f0",borderRadius:4,overflow:"hidden"}}>
             {allSlots.filter(s => !isOtSlot(s)).map((s,i) => {
               const ss    = toMin(s.start_time);
@@ -4447,11 +4465,11 @@ export default function Management2() {
         {/* ── 5. HOURLY TABLE — spans all columns ──
             16:9: row 4 (last row).  9:16: row 5 (last row of 5 after
                   r9's histogram fold into the quad).                  */}
-        <div style={{...card(),gridColumn:"1/-1",overflow:"hidden",display:"flex",flexDirection:"column",
+        <div data-box="hourly" style={{...card(),gridColumn:"1/-1",overflow:"hidden",display:"flex",flexDirection:"column",minHeight:0,
                       ...(isPortrait ? { gridRow: 4 } : {}),   // demo page 2: hourly moved up
                     }}>
-          <div style={{flex:1,overflowX:"auto",overflowY:"hidden"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",tableLayout:"fixed"}}>
+          <div style={{flex:1,minHeight:0,overflowX:"auto",overflowY:"hidden"}}>
+            <table style={{width:"100%",height:"100%",borderCollapse:"collapse",tableLayout:"fixed"}}>
               <thead>
                 <tr style={{background:bgDeep}}>
                   <th style={{padding:"6px 8px",textAlign:"left",fontWeight:900,fontSize:11,
@@ -5039,6 +5057,8 @@ export default function Management2() {
         <CollectorLive dark={D} />
       </LiveModal>
       {docsOpen && <DocViewer start={0} onClose={() => setDocsOpen(false)} />}
+      {layoutOpen && <LayoutPanel layoutKey={isPortrait ? "portrait" : "landscape"} lay={lay} update={updateLay}
+                                  saved={laySaved} dark={D} onClose={() => setLayoutOpen(false)} />}
 
       {ngListModal && (
         <NgListModal

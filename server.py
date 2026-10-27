@@ -958,6 +958,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(full) if os.path.isfile(full) else self._json({"detail": "No sample clip"}, 404)
         if p == "/api/demo/collector":
             return self._json(collector_view())
+        if p == "/api/demo/dashboard-layout":       # MANAGEMENT-2 box sizes + CT axis range (⚙ LAYOUT)
+            return self._json(_load("dashboard_layout.json", {}))
         if p == "/api/demo/cycle-videos":
             return self._json(cycle_videos_view(q))
         if p == "/api/demo/camera/live.mjpg":
@@ -1151,6 +1153,12 @@ class Handler(BaseHTTPRequestHandler):
                 CAMERA.reload()                   # restart the stream with the new camera settings
             out = {**obj, "password_set": bool(obj.get("password")), "password": ""}
             return self._json(out)
+        if p == "/api/demo/dashboard-layout":
+            if len(json.dumps(body)) > 20000:
+                return self._json({"detail": "Layout too large"}, 400)
+            with LOCK:
+                _save("dashboard_layout.json", body)
+            return self._json(body)
         return self._json({"ok": True})
 
     do_PATCH = do_PUT

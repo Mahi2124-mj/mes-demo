@@ -120,6 +120,15 @@ The server PC must be on the machine network (192.168.30.x).
 - Without ffmpeg: the preview falls back to the camera's HTTP snapshot (`/ISAPI/.../picture` or `/cgi-bin/camera`), no clips.
 - Live preview: Camera page → Preview → Live, or the 📷 CAMERA button on MANAGEMENT-2.
 
+## Layout (MANAGEMENT-2)
+⚙ LAYOUT in the header opens a panel; every change shows at once and is saved on the server
+(`data/dashboard_layout.json`), so every screen shows the same (other screens pick it up within 30 s).
+- CT graph seconds (both layouts): from / to (e.g. 0-70 s or 0-90 s; Auto = follows the data), and where
+  the CT distribution axis ends. Cycles above the end are drawn at the top with a white ring.
+- Box sizes, separately for portrait and landscape: − / + for the KPI band, CT graph + CT distribution,
+  CT graph width, hourly table, shift timeline, documents, loss distribution and poka-yoke / sensor.
+  "Auto" puts a size back to its automatic value; "Reset box sizes" / "Reset CT seconds" restore all.
+
 ## Documents (MANAGEMENT-2)
 The line's sheets open in a popup: 📄 DOCUMENTS button in the MANAGEMENT-2 header (any layout), or
 tap a sheet in the Documents card (portrait layout: Track Record upright on the left, the four

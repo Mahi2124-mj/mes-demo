@@ -19,3 +19,6 @@ data/machine.json
 data/comments.json
 # Live PLC data collected by the server
 data/live/
+
+# MANAGEMENT-2 layout set with ⚙ LAYOUT (box sizes, CT axis range)
+data/dashboard_layout.json
