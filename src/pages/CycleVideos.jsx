@@ -141,7 +141,7 @@ export default function CycleVideos() {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800 }}>Cycle time vs video length</div>
             <div style={{ fontSize: 11, color: C.sub, marginTop: 2, lineHeight: 1.5 }}>
-              Expected video = {data && data.clip_last_s > 0 ? <>the last {data.clip_last_s} s of the cycle (or all of a shorter cycle)</> : "cycle time"}
+              Expected video = cycle time
               {data && (data.pre_roll_s || data.post_roll_s)
                 ? <> + {data.pre_roll_s} s pre-roll + {data.post_roll_s} s post-roll (Camera page → Clip settings)</>
                 : <> (pre/post roll 0 s)</>}
@@ -267,7 +267,7 @@ export default function CycleVideos() {
                   Difference: <b style={{ color: statusOf(cur) === "off" ? C.ng : C.text }}>
                     {cur.diff_s == null ? "—" : `${cur.diff_s > 0 ? "+" : ""}${cur.diff_s.toFixed(2)} s`}</b>
                   {" "}· {cur.is_ng ? "NG" : "OK"} · part {cur.part_code || "—"}
-                  {cur.long && <> · <span style={{ color: C.sub }}>clip = the last {data?.clip_s} s of this cycle</span></>}
+                  {cur.long && <> · <span style={{ color: C.sub }}>cycle longer than 10 min: the clip shows its last 10 min</span></>}
                 </div>
               </>
             )}
