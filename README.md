@@ -106,8 +106,12 @@ The server PC must be on the machine network (192.168.30.x).
   H.264 or H.265 both work (clips are always saved as H.264).
 - One ffmpeg process keeps one RTSP session: it records 4 s segments (stream copy, no re-encode)
   and feeds the live preview (5 fps JPEG). For each cycle, exactly that cycle (+ pre/post roll, default
-  0 s) is cut frame-accurately and re-encoded to H.264 into `clips/live/cycle_<seq>.mp4`, so the clip
-  is as long as the cycle time; MANAGEMENT-2 plays it like the recorded clips.
+  0 s) is saved as H.264 in `clips/live/cycle_<seq>.mp4`, so the clip is as long as the cycle time;
+  MANAGEMENT-2 plays it like the recorded clips.
+- Fast clips: while recording, each finished segment is encoded to H.264 in the background
+  (`clips/live/seg/enc/`). At the OK/NG signal only the first and last few seconds are encoded (at the
+  exact frame) and joined to those chunks without re-encoding: a clip is ready about 3-4 s after the
+  signal, however long the cycle was. This keeps one CPU core partly busy while recording.
 - Recording OFF: no clips; the preview opens the stream only while someone is watching.
 - Every cycle gets a clip while recording is on, also when the camera is reconnecting at that moment
   (the clip then has what was recorded). A failed cut is retried once; two clips can be cut at a time.
