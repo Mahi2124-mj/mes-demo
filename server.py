@@ -32,7 +32,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from camera import Camera, MAX_CLIP_S
+from camera import Camera, clip_limit
 from collector import ANDON, OFFLINE, Collector, LiveStore, ShiftClock
 from demo_plc import DemoPlc, collector_settings, demo_cycle_times, signal_map
 
@@ -90,7 +90,8 @@ CAMERA_DEFAULTS = {
     "assigned_machine": "Nut-Runner Demo Station", "recording_enabled": True,
     "codec": "H.264 Main", "resolution": "1920 × 1080", "fps": 25, "bitrate_kbps": 2000,
     "iframe_interval": 25, "video_save_path": os.path.join(HERE, "clips"),
-    "retention_days": 30, "pre_roll_s": 0, "post_roll_s": 0,     # 0/0: clip length = cycle time
+    "retention_days": 30, "pre_roll_s": 0, "post_roll_s": 0,
+    "clip_last_s": 8,          # clip = the last N s of each cycle (0 = the whole cycle, up to 10 min)
 }
 
 
@@ -702,19 +703,21 @@ def cycle_videos_view(q):
     rd, sh = _live_pick(q)
     cam = camera_cfg()
     pre, post = float(cam.get("pre_roll_s") or 0), float(cam.get("post_roll_s") or 0)
+    limit = clip_limit(cam)
     rows = []
     for c in reversed(STORE.cycles(rd, sh)):
         info = CAMERA.clip_info(c["cycle_seq"])
-        expected = round(min(c["ct"], MAX_CLIP_S) + pre + post, 2)   # longer cycles: clip of the last 10 min
+        expected = round(min(c["ct"], limit) + pre + post, 2)   # a longer cycle: clip of its last `limit` s
         video = info.get("duration") if info else None
         rows.append({"cycle_seq": c["cycle_seq"], "ts": c["ts"], "ct": c["ct"], "is_ng": c["is_ng"],
-                     "part_code": c.get("part_code"), "long": c["ct"] > MAX_CLIP_S, "clip": info is not None,
+                     "part_code": c.get("part_code"), "long": c["ct"] > limit, "clip": info is not None,
                      "video_s": video, "expected_s": expected,
                      "diff_s": None if video is None else round(video - expected, 2)})
     shifts = [{"record_date": d, "shift_name": s_} for d, s_, _ in reversed(STORE.shift_files())]
     if not any(x["record_date"] == rd and x["shift_name"] == sh for x in shifts):
         shifts.insert(0, {"record_date": rd, "shift_name": sh})
     return {"record_date": rd, "shift_name": sh, "ideal_ct": _live_ideal(), "pre_roll_s": pre, "post_roll_s": post,
+            "clip_s": limit, "clip_last_s": float(cam.get("clip_last_s") or 0),
             "shifts": shifts, "rows": rows}
 
 

@@ -369,7 +369,7 @@ export function CollectorLive({ dark = false }) {
                 Saved <b style={{ color: c.text }}>{cam.clips_cut}</b>
                 {cam.clips_failed > 0 && <> · failed <b style={{ color: "#dc2626" }}>{cam.clips_failed}</b></>}
                 {cam.camera_codec && <> · camera sends <b style={{ color: c.text }}>{String(cam.camera_codec).toUpperCase()}</b>
-                  {" "}(clips saved as H.264, exactly the cycle time{cam.pre_post ? ` + ${cam.pre_post}` : ""})</>}
+                  {" "}(clips saved as H.264, {cam.clip_last_s > 0 ? `the last ${cam.clip_last_s} s of each cycle` : "exactly the cycle time"}{cam.pre_post ? ` + ${cam.pre_post}` : ""})</>}
               </div>
               {why && <div style={{ color: "#d97706", fontWeight: 700 }}>No clips now: {why}</div>}
               {cam.last_clip_error && <div style={{ color: "#dc2626" }}>Last clip error: {cam.last_clip_error}</div>}

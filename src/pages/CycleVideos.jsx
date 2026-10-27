@@ -66,7 +66,7 @@ export default function CycleVideos() {
       const r = await fetch("/api/demo/camera", { method: "PUT", headers: { "Content-Type": "application/json" },
                                                   body: JSON.stringify({ pre_roll_s: 0, post_roll_s: 0 }) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setRollMsg("Done: new clips = exactly the cycle time.");
+      setRollMsg("Done: no pre/post roll on new clips.");
       setData(d => (d ? { ...d, pre_roll_s: 0, post_roll_s: 0 } : d));
     } catch (e) {
       setRollMsg(`Could not save: ${e.message}`);
@@ -141,7 +141,7 @@ export default function CycleVideos() {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800 }}>Cycle time vs video length</div>
             <div style={{ fontSize: 11, color: C.sub, marginTop: 2, lineHeight: 1.5 }}>
-              Expected video = cycle time
+              Expected video = {data && data.clip_last_s > 0 ? <>the last {data.clip_last_s} s of the cycle (or all of a shorter cycle)</> : "cycle time"}
               {data && (data.pre_roll_s || data.post_roll_s)
                 ? <> + {data.pre_roll_s} s pre-roll + {data.post_roll_s} s post-roll (Camera page → Clip settings)</>
                 : <> (pre/post roll 0 s)</>}
@@ -152,7 +152,7 @@ export default function CycleVideos() {
                 <button type="button" onClick={zeroRolls}
                   style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 800,
                            color: "#fff", background: "linear-gradient(135deg,#1e40af,#2563eb)" }}>
-                  Make clips = cycle time (pre/post roll → 0 s)
+                  Remove pre/post roll (→ 0 s)
                 </button>
                 <span style={{ fontSize: 11, color: C.sub }}>Only new clips change; clips already saved keep their length.</span>
               </div>
@@ -267,7 +267,7 @@ export default function CycleVideos() {
                   Difference: <b style={{ color: statusOf(cur) === "off" ? C.ng : C.text }}>
                     {cur.diff_s == null ? "—" : `${cur.diff_s > 0 ? "+" : ""}${cur.diff_s.toFixed(2)} s`}</b>
                   {" "}· {cur.is_ng ? "NG" : "OK"} · part {cur.part_code || "—"}
-                  {cur.long && <> · <span style={{ color: C.warn }}>cycle longer than 10 min: the clip shows its last 10 min</span></>}
+                  {cur.long && <> · <span style={{ color: C.sub }}>clip = the last {data?.clip_s} s of this cycle</span></>}
                 </div>
               </>
             )}

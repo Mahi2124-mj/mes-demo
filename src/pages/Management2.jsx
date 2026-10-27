@@ -2862,7 +2862,7 @@ export default function Management2() {
         display:"grid",
         gridTemplateColumns: isPortrait ? "1fr 200px 185px" : "1fr 285px",
         gridTemplateRows:    isPortrait
-          ? `minmax(50px, auto) 205px 1.28fr auto auto 2.2fr`      // CT graph | CT distribution ~500 px on 1080x1920
+          ? `minmax(50px, auto) 205px 1.1fr auto 1fr auto`      // CT row ~470 px on 1080x1920; spare height to the timeline
           : "minmax(50px, auto) 1fr auto auto",
         gap:6, padding:6,
         paddingTop: gapShift ? 40 : 6,
@@ -4250,7 +4250,7 @@ export default function Management2() {
                   rows when the quad panel absorbed the histogram). */}
         <div style={{...card(),gridColumn:"1/-1",
                       padding:"6px 12px",display:"flex",flexDirection:"column",gap:5,
-                      ...(isPortrait ? { gridRow: 5 } : {}),
+                      ...(isPortrait ? { gridRow: 5, minHeight: 0 } : {}),
                     }}>
 
           {/* Header */}
@@ -4278,7 +4278,8 @@ export default function Management2() {
           </div>
 
           {/* THE BAR — status-logged segments, no production math */}
-          <div style={{position:"relative",height:20,background:D?"#141e2e":"#e2e8f0",borderRadius:4,overflow:"hidden"}}>
+          <div style={{position:"relative",...(isPortrait ? { flex:1, minHeight:20 } : { height:20 }),
+                       background:D?"#141e2e":"#e2e8f0",borderRadius:4,overflow:"hidden"}}>
             {allSlots.filter(s => !isOtSlot(s)).map((s,i) => {
               const ss    = toMin(s.start_time);
               const se    = toMin(s.end_time);

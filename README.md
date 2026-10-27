@@ -73,7 +73,8 @@ The server PC must be on the machine network (192.168.30.x).
   PLC OFFLINE time and loss statuses inside that time. The first cycle of a shift is timed from the shift
   start (+ start-up delay) or from when the collector reached the PLC, whichever is later. After a server
   restart the next cycle is still timed from the last stored signal.
-- The clip is exactly the cycle time (cycles longer than 10 minutes get a clip of their last 10 minutes).
+- The clip is the **last 8 s** of the cycle by default (Camera page → Clip length; 0 = the whole cycle,
+  up to 10 minutes). An 8 s clip is ready about 3 s after the OK/NG signal.
   The CT graph's axis follows the data (2x to 6x the ideal CT).
 - Ideal CT (Machine Config) defaults to **10 s**. Speed loss is **net**: Σ(CT − ideal), so a 14 s cycle
   adds 4 s and a 9 s cycle takes 1 s back; it can go negative (shown green).
@@ -105,9 +106,9 @@ The server PC must be on the machine network (192.168.30.x).
   The password is entered on the Camera page (never shown again, never sent to the browser).
   H.264 or H.265 both work (clips are always saved as H.264).
 - One ffmpeg process keeps one RTSP session: it records 4 s segments (stream copy, no re-encode)
-  and feeds the live preview (5 fps JPEG). For each cycle, exactly that cycle (+ pre/post roll, default
-  0 s) is cut frame-accurately and re-encoded to H.264 into `clips/live/cycle_<seq>.mp4`, so the clip
-  is as long as the cycle time; MANAGEMENT-2 plays it like the recorded clips.
+  and feeds the live preview (5 fps JPEG). For each cycle, its last "clip length" seconds (default 8 s;
+  0 = the whole cycle) + pre/post roll (default 0 s) are cut frame-accurately and re-encoded to H.264 into
+  `clips/live/cycle_<seq>.mp4`; MANAGEMENT-2 plays it like the recorded clips.
 - Recording OFF: no clips; the preview opens the stream only while someone is watching.
 - Every cycle gets a clip while recording is on, also when the camera is reconnecting at that moment
   (the clip then has what was recorded). A failed cut is retried once; two clips can be cut at a time.

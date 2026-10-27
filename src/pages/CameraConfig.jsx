@@ -37,6 +37,7 @@ export const DEFAULTS = {
   retention_days: 30,
   pre_roll_s: 0,                            // 0/0: clip length = cycle time
   post_roll_s: 0,
+  clip_last_s: 8,                           // clip = last N s of each cycle; 0 = whole cycle
 };
 
 const MACHINES = ["Nut-Runner Demo Station"];
@@ -273,6 +274,8 @@ function validate(f) {
   if (!sp) e.video_save_path = "Video save path is required";
   else if (!(sp.startsWith("/") || /^[A-Za-z]:[\\/]/.test(sp))) e.video_save_path = "Enter an absolute folder path";
   const rd = intIn(f.retention_days, 1, 365, "Retention"); if (rd) e.retention_days = rd;
+  if (!isNum(f.clip_last_s)) e.clip_last_s = "Clip length is required";
+  else if (Number(f.clip_last_s) < 0 || Number(f.clip_last_s) > 600) e.clip_last_s = "Clip length must be 0-600 s";
   for (const [k, label] of [["pre_roll_s", "Pre-roll"], ["post_roll_s", "Post-roll"]]) {
     if (!isNum(f[k])) e[k] = `${label} is required`;
     else if (Number(f[k]) < 0) e[k] = `${label} must be 0 or more`;
@@ -300,6 +303,7 @@ function toPayload(f) {
     retention_days: parseInt(f.retention_days, 10),
     pre_roll_s: Number(f.pre_roll_s),
     post_roll_s: Number(f.post_roll_s),
+    clip_last_s: Number(f.clip_last_s),
   };
 }
 
@@ -736,9 +740,19 @@ export default function CameraConfig() {
                          onChange={e => set("post_roll_s", e.target.value)} onBlur={touch("post_roll_s")} invalid={!!errOf("post_roll_s")} />
                 </FF>
               </div>
+              <div className="cc-grid3">
+                <FF label="Clip length (s) *" error={errOf("clip_last_s")} hint="Last N s of each cycle; 0 = whole cycle" htmlFor="cc-cliplen">
+                  <Input id="cc-cliplen" type="number" min={0} max={600} step={1} value={form.clip_last_s}
+                         onChange={e => set("clip_last_s", e.target.value)} onBlur={touch("clip_last_s")} invalid={!!errOf("clip_last_s")} />
+                </FF>
+              </div>
               <Notice tone="blue">
                 Clips older than <strong>{isInt(form.retention_days) ? parseInt(form.retention_days, 10) : "—"} days</strong> are deleted.
-                Each clip covers the cycle plus {isNum(form.pre_roll_s) ? Number(form.pre_roll_s) : "—"} s before and {isNum(form.post_roll_s) ? Number(form.post_roll_s) : "—"} s after.
+                Each clip covers {isNum(form.clip_last_s) && Number(form.clip_last_s) > 0
+                  ? <>the last <strong>{Number(form.clip_last_s)} s</strong> of the cycle (a shorter cycle: all of it)</>
+                  : <>the whole cycle (up to 10 min)</>}
+                {" "}plus {isNum(form.pre_roll_s) ? Number(form.pre_roll_s) : "—"} s before and {isNum(form.post_roll_s) ? Number(form.post_roll_s) : "—"} s after.
+                A short clip is ready a few seconds after the cycle.
               </Notice>
             </div>
           </Card>

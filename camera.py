@@ -327,6 +327,7 @@ class Camera:
         cfg = self.get_cfg()
         pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
         out["pre_post"] = f"{pre:g} s before / {post:g} s after" if pre or post else ""
+        out["clip_last_s"] = float(cfg.get("clip_last_s") or 0)
         return out
 
     def add_viewer(self):
@@ -358,7 +359,7 @@ class Camera:
             return
         cfg = self.get_cfg()
         pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
-        start = max(start, end - dt.timedelta(seconds=MAX_CLIP_S)) - dt.timedelta(seconds=pre)
+        start = max(start, end - dt.timedelta(seconds=clip_limit(cfg))) - dt.timedelta(seconds=pre)
         self._clip_state(seq, "queued", start=start)
         self.clips.put((seq, start, end + dt.timedelta(seconds=post), 0, 0.0))
 
@@ -705,6 +706,12 @@ class Camera:
                     os.remove(p)
         except OSError:
             pass
+
+
+def clip_limit(cfg):
+    """Longest clip in seconds: the camera's "clip length" (last N s of the cycle), else 10 minutes."""
+    n = float(cfg.get("clip_last_s") or 0)
+    return min(n, MAX_CLIP_S) if n > 0 else MAX_CLIP_S
 
 
 def http_get(url, user, password, timeout=4):
