@@ -709,13 +709,24 @@ class Camera:
         # Each ffmpeg run restarts its timestamps: only join segments of the run that holds the end.
         run = bisect.bisect_right(self.launches, segs[idx[-1]][0].timestamp())
         cand = [c for c in cand if bisect.bisect_right(self.launches, c[0].timestamp()) == run]
-        # Place them on the run's media timeline, anchored at the first one's arrival (one clock, like a
-        # single continuous recording), then keep those overlapping [start, end].
-        p0 = self._pts(cand[0][1])
+        # Place them on the run's media timeline: wall = timestamp + offset. A segment can only arrive late,
+        # never early, so the offset is the smallest (arrival - timestamp) of the nearby segments.
+        run_segs = [x for x in segs if bisect.bisect_right(self.launches, x[0].timestamp()) == run]
+        k = next((i for i, x in enumerate(run_segs) if x[1] == cand[0][1]), 0)
+        offs = []
+        for t0, name in run_segs[max(0, k - 10): k + len(cand)]:
+            p = self._pts(name)
+            if p is not None and name in self.seg_seen:      # (a name time has whole seconds only)
+                offs.append(t0.timestamp() - p)
+        offs.sort()
+        mid = offs[len(offs) // 2] if offs else None
+        offs = [o for o in offs if mid is not None and abs(o - mid) < 10]   # not across a timestamp wrap
+        offset = offs[0] if offs else None
         placed = []
         for t0, name in cand:
             p = self._pts(name)
-            placed.append((cand[0][0] + dt.timedelta(seconds=p - p0) if p is not None and p0 is not None else t0, name))
+            ok = offset is not None and p is not None and abs(t0.timestamp() - p - offset) < 10
+            placed.append((dt.datetime.fromtimestamp(p + offset) if ok else t0, name))
         use = []
         for i, (t0, name) in enumerate(placed):
             t1 = placed[i + 1][0] if i + 1 < len(placed) else dt.datetime.now() + dt.timedelta(seconds=60)
@@ -742,7 +753,16 @@ class Camera:
                 else:
                     if b is not None and b - a < 0.04:
                         continue
-                    piece = self._encode_piece(name, a, None if b is None else b - a, os.path.join(work, f"{i}.mp4"), errors)
+                    out = os.path.join(work, f"{i}.mp4")
+                    piece = self._encode_piece(name, a, None if b is None else b - a, out, errors)
+                    # The last piece may not be on disk in full yet (the camera's picture arrives late):
+                    # wait for it, up to 6 s.
+                    for _ in range(6 if last and b is not None else 0):
+                        got = self._duration_of(piece) if piece else 0.0
+                        if got is not None and got >= (b - a) - 0.06:
+                            break
+                        time.sleep(1.0)
+                        piece = self._encode_piece(name, a, b - a, out, errors)
                 if piece:
                     pieces.append(os.path.relpath(piece, self.chunk_dir()).replace(os.sep, "/"))
             if not pieces:
