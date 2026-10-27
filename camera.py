@@ -170,6 +170,7 @@ class Camera:
         self.need_duration = set()           # clips without a cycle_<seq>.json yet
         self.clip_window = {}                # clip -> its start/end, kept while its length can't be read
         self.clip_states = {}                # seq -> {"state": queued | cutting | failed, "reason", "start"} until saved
+        self.seg_pts = {}                    # segment file -> its first timestamp (continuous within a recording run)
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
                      "last_clip_error": None, "source": None, "camera_codec": None}
@@ -663,6 +664,21 @@ class Camera:
         os.replace(tmp, out)
         return out
 
+    def _pts(self, seg_name):
+        """First timestamp of a segment (seconds), cached; None if it can't be read."""
+        if seg_name in self.seg_pts:
+            return self.seg_pts[seg_name]
+        try:                                 # ffmpeg's "Duration: 00:00:04.00, start: 17.680000," line
+            r = subprocess.run([self.ffmpeg, "-hide_banner", "-nostdin", "-i", seg_name], cwd=self.seg_dir(),
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=10, creationflags=NO_WINDOW)
+            v = float(re.search(r"start: (-?[\d.]+)", r.stderr.decode("utf-8", "replace")).group(1))
+        except (OSError, AttributeError, ValueError, subprocess.TimeoutExpired):
+            return None
+        if len(self.seg_pts) > 2000:
+            self.seg_pts.clear()
+        self.seg_pts[seg_name] = v
+        return v
+
     def _encode_chunks(self):
         while True:
             time.sleep(0.5)
@@ -674,6 +690,8 @@ class Camera:
                 for (t0, name), _ in zip(segs, segs[1:]):      # the newest segment is still being written
                     if t0 >= horizon and not self._chunk_of(name):
                         self._encode_piece(name, None, None, os.path.join(self.chunk_dir(), name + ".mp4"))
+                    if t0 >= horizon:
+                        self._pts(name)                          # warm the cache the cut reads
             except Exception:  # noqa: BLE001 - a bad segment must not stop the chunks
                 pass
 
@@ -682,18 +700,29 @@ class Camera:
         start += dt.timedelta(seconds=LATENCY_S)
         end += dt.timedelta(seconds=LATENCY_S)
         segs = self._segments()
-        # segments that overlap [start, end]: a segment runs until the next one starts
-        # (a segment can be much longer than SEGMENT_S: it ends on a keyframe)
+        # segments that overlap [start, end] by arrival time, plus one more on each side (arrival times jitter)
+        idx = [i for i, (t0, _) in enumerate(segs)
+               if t0 <= end and (segs[i + 1][0] if i + 1 < len(segs) else dt.datetime.now()) >= start]
+        if not idx:
+            raise RuntimeError("no recorded video for this time")
+        cand = segs[max(0, idx[0] - 1): idx[-1] + 2]
+        # Each ffmpeg run restarts its timestamps: only join segments of the run that holds the end.
+        run = bisect.bisect_right(self.launches, segs[idx[-1]][0].timestamp())
+        cand = [c for c in cand if bisect.bisect_right(self.launches, c[0].timestamp()) == run]
+        # Place them on the run's media timeline, anchored at the first one's arrival (one clock, like a
+        # single continuous recording), then keep those overlapping [start, end].
+        p0 = self._pts(cand[0][1])
+        placed = []
+        for t0, name in cand:
+            p = self._pts(name)
+            placed.append((cand[0][0] + dt.timedelta(seconds=p - p0) if p is not None and p0 is not None else t0, name))
         use = []
-        for i, (t0, name) in enumerate(segs):
-            t1 = segs[i + 1][0] if i + 1 < len(segs) else dt.datetime.now()
-            if t0 <= end and t1 >= start:
+        for i, (t0, name) in enumerate(placed):
+            t1 = placed[i + 1][0] if i + 1 < len(placed) else dt.datetime.now() + dt.timedelta(seconds=60)
+            if t0 <= end and t1 > start:
                 use.append((t0, t1, name))
         if not use:
             raise RuntimeError("no recorded video for this time")
-        # Each ffmpeg run restarts its timestamps: only join segments of the run that holds the end.
-        run = bisect.bisect_right(self.launches, use[-1][0].timestamp())
-        use = [u for u in use if bisect.bisect_right(self.launches, u[0].timestamp()) == run]
         if run not in self.run_codec:
             self.run_codec[run] = self._codec_of(use[0][2])
             self._set(camera_codec=self.run_codec[run])
