@@ -567,6 +567,8 @@ class Collector:
             if row:
                 t0, _ = self.clock.bounds(dt.date.fromisoformat(rd), row)
                 start = t0 + dt.timedelta(minutes=float(row.get("startup_delay_min") or 0))
+                if start >= now:                 # a part inside the start-up delay: from the shift start
+                    start = t0
             if self.connected_at and self.connected_at > start:
                 start = self.connected_at
             start, source = min(start, now), "first"
