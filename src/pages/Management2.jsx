@@ -4069,6 +4069,10 @@ export default function Management2() {
             const pyFailedCount = pokaStatus.filter(p => p.is_bypassed).length;
             const pyAllOk       = pokaStatus.length > 0 && pyFailedCount === 0;
             const pyEmpty       = pokaStatus.length === 0;
+            // No checks configured: shows OK; a tap switches to "No Checks" and back (saved for every screen)
+            const pyNoChecks    = pyEmpty && lay.display.poka_no_checks;
+            const pyOk          = pyAllOk || (pyEmpty && !pyNoChecks);
+            const togglePy      = () => updateLay(prev => ({ ...prev, display: { ...prev.display, poka_no_checks: !prev.display.poka_no_checks } }));
             const bgGood        = `${STATUS_CLR["RUNNING"]}14`;
             const bgBad         = `${STATUS_CLR["BREAKDOWN"]}22`;
             const bgIdle        = D ? "#141e2e" : "#e2e8f0";
@@ -4086,29 +4090,28 @@ export default function Management2() {
                   )}
                 </div>
                 <button
-                  onClick={() => setPyModalOpen(true)}
-                  disabled={pyEmpty}
-                  title={pyEmpty ? "No PY checks for current model"
+                  onClick={pyEmpty ? togglePy : () => setPyModalOpen(true)}
+                  title={pyEmpty ? (pyNoChecks ? "Tap to show OK" : "Tap to show No Checks")
                                 : pyAllOk ? "All poka-yoke checks passing — tap for shift history"
                                           : `${pyFailedCount} check${pyFailedCount!==1?'s':''} failed — tap for detail`}
                   style={{
-                    flex:1, width:"100%", border:"none", cursor: pyEmpty ? "default" : "pointer",
+                    flex:1, width:"100%", border:"none", cursor: "pointer",
                     padding: isPortrait ? "6px 8px" : "12px 14px",
-                    background: pyEmpty ? bgIdle : pyAllOk ? bgGood : bgBad,
+                    background: pyNoChecks ? bgIdle : pyOk ? bgGood : bgBad,
                     display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
                     gap: isPortrait ? 3 : 8, transition:"background .15s",
                     color: text,
                     fontFamily:"'Barlow Condensed','Barlow',sans-serif",
-                    animation: (!pyEmpty && !pyAllOk) ? "pulse 1.4s infinite" : "none",
+                    animation: !pyOk && !pyNoChecks ? "pulse 1.4s infinite" : "none",
                   }}>
                   <div style={{fontSize: isPortrait ? 34 : 56, lineHeight:1,
-                    color: pyEmpty ? textMut : pyAllOk ? STATUS_CLR["RUNNING"] : STATUS_CLR["BREAKDOWN"]}}>
-                    {pyEmpty ? "—" : pyAllOk ? "✓" : "⚠"}
+                    color: pyNoChecks ? textMut : pyOk ? STATUS_CLR["RUNNING"] : STATUS_CLR["BREAKDOWN"]}}>
+                    {pyNoChecks ? "—" : pyOk ? "✓" : "⚠"}
                   </div>
                   <div style={{fontSize: isPortrait ? 14 : 22, fontWeight:900,letterSpacing:".04em",textTransform:"uppercase",
                     textAlign:"center", lineHeight:1.05,
-                    color: pyEmpty ? textMut : pyAllOk ? STATUS_CLR["RUNNING"] : STATUS_CLR["BREAKDOWN"]}}>
-                    {pyEmpty ? "No Checks" : pyAllOk ? "All Set OK" : `${pyFailedCount} Failed`}
+                    color: pyNoChecks ? textMut : pyOk ? STATUS_CLR["RUNNING"] : STATUS_CLR["BREAKDOWN"]}}>
+                    {pyNoChecks ? "No Checks" : pyOk ? "All Set OK" : `${pyFailedCount} Failed`}
                   </div>
                   <div style={{fontSize: isPortrait ? 8 : 11, fontWeight:700,color:textMut,letterSpacing:".05em",textTransform:"uppercase",
                     textAlign:"center", lineHeight:1.1}}>

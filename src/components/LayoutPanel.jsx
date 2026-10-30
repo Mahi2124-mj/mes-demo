@@ -7,6 +7,7 @@ export const LAYOUT_DEFAULTS = {
   ct: { min: 0, max: null, hist_max: null },            // seconds; null = automatic
   portrait: { kpi_h: 205, ct_h: 1.1, ct_split: 60, hourly_h: null, timeline_h: 1, docs_h: null, loss_w: 200, side_w: 185 },
   landscape: { side_w: 285, loss_w: 215, timeline_h: null, hourly_h: null },
+  display: { poka_no_checks: false },                   // poka-yoke box without checks: OK (tap: No Checks)
 };
 
 // unit: "px" | "share" (fr of the free height) | "%"; auto: data-box id measured when an automatic size is first changed
@@ -44,7 +45,9 @@ function merge(raw) {
   for (const [group, defs] of Object.entries(LAYOUT_DEFAULTS)) {
     out[group] = { ...defs };
     const g = src[group] && typeof src[group] === "object" ? src[group] : {};
-    for (const k of Object.keys(defs)) if (k in g && (g[k] === null || num(g[k]) !== null)) out[group][k] = g[k];
+    for (const k of Object.keys(defs)) {
+      if (k in g && (typeof defs[k] === "boolean" ? typeof g[k] === "boolean" : g[k] === null || num(g[k]) !== null)) out[group][k] = g[k];
+    }
   }
   return out;
 }

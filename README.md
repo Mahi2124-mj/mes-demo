@@ -128,6 +128,8 @@ The server PC must be on the machine network (192.168.30.x).
 - Box sizes, separately for portrait and landscape: − / + for the KPI band, CT graph + CT distribution,
   CT graph width, hourly table, shift timeline, documents, loss distribution and poka-yoke / sensor.
   "Auto" puts a size back to its automatic value; "Reset box sizes" / "Reset CT seconds" restore all.
+- Poka-yoke box with no checks configured: shows ✓ ALL SET OK; tap it to show "No Checks" (tap again
+  for OK). Saved the same way, for every screen. With real checks it shows pass / fail and opens the detail.
 
 ## Documents (MANAGEMENT-2)
 The line's sheets open in a popup: 📄 DOCUMENTS button in the MANAGEMENT-2 header (any layout), or
