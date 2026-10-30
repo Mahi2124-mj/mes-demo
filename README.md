@@ -22,8 +22,10 @@ Two kinds of data:
   80 of them have a clip in the MES archive; those 80 plus #1683 are shown (81 cycles).
   **Demo edit (user request, 9-Oct):** cycle times are staged — only #1662, #1669 and #1683 are over
   target (17.84 / 19.26 / 21.07 s); every other cycle is 13.0-14.8 s. The real values are kept in
-  `ct_real`. #1683 was added on request; it has no clip, so it shows "No video available".
-- `clips/main/cycle_<seq>.mp4` — the matching recorded clips (H.264, copied read-only).
+  `ct_real`. #1683 was added on request; it has no clip, so its popup says "this recorded cycle has no clip".
+- `clips/main/cycle_<seq>.mp4` — the matching recorded clips (H.264, copied read-only). **Not in git**
+  (`clips/` is ignored, 144 MB): copy the `clips\main` folder from the PC where the demo was first set up.
+  Without it the SUPERVISOR / MANAGEMENT video popups say "the recorded clips are not on the server PC".
 - `data/mgmt/` — YCA-SS line config (no PLC addresses), production history, 30-day CT histogram, PM status.
 - `data/machine.json`, `data/camera.json` — what the config pages save.
 - `data/comments.json` — comments typed on cycle videos.
@@ -115,8 +117,11 @@ The server PC must be on the machine network (192.168.30.x).
 - Recording OFF: no clips; the preview opens the stream only while someone is watching.
 - Every cycle gets a clip while recording is on, also when the camera is reconnecting at that moment
   (the clip then has what was recorded). A failed cut is retried once; two clips can be cut at a time.
-  No clip yet: the popup says why (still being saved — it opens by itself, failed + reason, or the
-  camera was not recording / Recording was OFF) instead of a "can't decode" message.
+  No clip yet: the popup says why (still being saved — it opens by itself, failed + reason, Recording was
+  OFF, or the server was stopped before the clip was saved) instead of a "can't decode" message. The reason
+  is kept next to the clips (`cycle_<seq>.noclip.json`), so it is still shown after a restart.
+- Server restart: clips of the last cycles that were still waiting (up to ~10 minutes back) are cut after
+  the start from the recording on disk.
 - Without ffmpeg: the preview falls back to the camera's HTTP snapshot (`/ISAPI/.../picture` or `/cgi-bin/camera`), no clips.
 - Live preview: Camera page → Preview → Live, or the 📷 CAMERA button on MANAGEMENT-2.
 

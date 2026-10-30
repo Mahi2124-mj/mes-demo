@@ -4768,8 +4768,18 @@ export default function Fullscreen() {
                     fetch(src, { method: "GET", headers: { Range: "bytes=0-0" }, signal: _errCtrl.signal })
                       .then(r => {
                         clearTimeout(_errTmo);
+                        if (r.status === 404) return r.json().catch(() => ({})).then(j => ({ r, j }));
                         try { if (r.body) r.body.cancel(); } catch { /* noop */ }
-                        if (r.status === 503) {
+                        return { r, j: null };
+                      })
+                      .then(({ r, j }) => {
+                        if (r.status === 404 && j && j.state) {
+                          // The server says why there is no clip (e.g. the recorded clips are not on this PC).
+                          setVideoModal(m => m ? {
+                            ...m, video_url: null, _lastUrl: null,
+                            error: `📷 No video for this cycle: ${j.reason || "not recorded"}`,
+                          } : m);
+                        } else if (r.status === 503) {
                           setVideoModal(m => m ? {
                             ...m,
                             video_url: null,

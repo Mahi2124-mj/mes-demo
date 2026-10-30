@@ -1972,9 +1972,14 @@ export default function WallboardLeft() {
                      if (el.dataset.probed !== "1") {
                        el.dataset.probed = "1";
                        fetch(videoCycle.url, { headers: { Range: "bytes=0-0" } })
-                         .then(r => {
-                           try { if (r.body) r.body.cancel(); } catch { /* noop */ }
-                           if (r.status === 404) el.dataset.retry = "99";
+                         .then(async r => {
+                           if (r.status === 404) {
+                             el.dataset.retry = "99";
+                             const j = await r.json().catch(() => ({}));
+                             if (j.reason) el.dataset.reason = j.reason;
+                           } else {
+                             try { if (r.body) r.body.cancel(); } catch { /* noop */ }
+                           }
                            el.dispatchEvent(new Event("error"));
                          })
                          .catch(() => el.dispatchEvent(new Event("error")));
@@ -2007,7 +2012,8 @@ export default function WallboardLeft() {
                      div.style.cssText = "padding:24px;color:#ef4444;font-size:13px;"
                        + "background:#1a0a0a;border:1px solid rgba(239,68,68,.4);"
                        + "border-radius:6px;font-family:'Barlow',sans-serif;";
-                     div.textContent = "No video available for this cycle";
+                     div.textContent = el.dataset.reason ? `No video for this cycle: ${el.dataset.reason}`
+                                                         : "No video available for this cycle";
                      parent.appendChild(div);
                    }} />
             {/* always-visible progress + time (native strip fades out) */}

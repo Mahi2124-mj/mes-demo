@@ -822,6 +822,21 @@ def cycle_videos_view(q):
             "shifts": shifts, "rows": rows}
 
 
+def requeue_clips():
+    """After a server start: clips of the last cycles that were not cut yet when the server stopped."""
+    cycles = []
+    for d, s_, _ in STORE.shift_files()[-2:]:
+        for c in STORE.cycles(d, s_)[-60:]:
+            try:
+                end = dt.datetime.fromisoformat(c["ts"])
+                cycles.append((int(c["cycle_seq"]), end - dt.timedelta(seconds=float(c.get("ct") or 0)), end))
+            except (KeyError, TypeError, ValueError):
+                pass
+    n = CAMERA.requeue(cycles)
+    if n:
+        print(f"[camera] cutting the clips of {n} cycle(s) from before the restart", flush=True)
+
+
 def collector_view():
     """Everything the 'Collector data' panels show, in one poll."""
     rd, sh, in_gap = CLOCK.at(dt.datetime.now())
@@ -947,7 +962,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"detail": "cycle_seq required"}, 400)
         full = os.path.join(CLIPS, folder, f"cycle_{seq}.mp4")
         if not os.path.isfile(full):
-            return self._json({"detail": "No clip for this cycle"}, 404)
+            d = os.path.dirname(full)
+            reason = (f"the recorded clips are not on the server PC (folder {d} is missing)" if not os.path.isdir(d)
+                      else "this recorded cycle has no clip")
+            return self._json({"detail": "No clip for this cycle", "state": "none", "reason": reason}, 404)
         return self._file(full, cache="private, max-age=86400", extra={"X-Clip-Source": "archive", "X-Video-Offset": "0"})
 
     def do_GET(self):
@@ -1320,6 +1338,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # stop.sh: exit through atexit
     COLLECTOR.start()
     CAMERA.start()
+    requeue_clips()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

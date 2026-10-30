@@ -170,6 +170,7 @@ class Camera:
         self.need_duration = set()           # clips without a cycle_<seq>.json yet
         self.clip_window = {}                # clip -> its start/end, kept while its length can't be read
         self.clip_states = {}                # seq -> {"state": queued | cutting | failed, "reason", "start"} until saved
+        self.first_seq = None                # first cycle the collector reported since this server start
         self.seg_pts = {}                    # segment file -> its first timestamp (continuous within a recording run)
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
@@ -283,17 +284,47 @@ class Camera:
 
     def clip_status(self, seq):
         """Why a cycle has no clip yet: {"state": "queued" | "cutting" | "failed" | "none", "reason"}."""
+        seq = int(seq)
         with self.lock:
-            st = self.clip_states.get(int(seq))
+            st = self.clip_states.get(seq)
+        st = st or self._read_noclip(seq)
         if st:
             return {"state": st["state"], "reason": st["reason"]}
         if not self.ffmpeg:
             reason = "ffmpeg is not installed on the server PC"
-        elif not self._wants_recording():
-            reason = "Camera Recording is OFF (Camera page)"
+        elif self.first_seq is None or seq < self.first_seq:
+            reason = "the server was stopped or restarted before this clip was saved"
         else:
-            reason = "the camera was not recording during this cycle"
+            reason = "the clip file is no longer on the server PC"
         return {"state": "none", "reason": reason}
+
+    # Why a cycle got no clip is kept on disk (cycle_<seq>.noclip.json), so it is still known after a restart.
+    def _noclip_path(self, seq, root=None):
+        return os.path.join(root or self.clips_root(), "live", f"cycle_{int(seq)}.noclip.json")
+
+    def _read_noclip(self, seq):
+        for root in (self.clips_root(), self.default_clips_dir):
+            try:
+                with open(self._noclip_path(seq, root), encoding="utf-8") as f:
+                    st = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(st, dict) and st.get("state"):
+                return st
+        return None
+
+    def requeue(self, cycles):
+        """After a server start: cut the clips of recent cycles that were still waiting when the server
+        stopped, while their recording is on disk. `cycles` = [(seq, start, end)]."""
+        if not self._wants_recording():
+            return 0
+        horizon = dt.datetime.now() - dt.timedelta(seconds=KEEP_SEGMENTS_S - 60)
+        n = 0
+        for seq, start, end in cycles:
+            if end >= horizon and not self.clip_path(seq) and not self._read_noclip(seq):
+                self._queue(seq, start, end)
+                n += 1
+        return n
 
     def reset_clips(self):
         """Drop queued clips and delete every live cycle clip (cycle numbers restart)."""
@@ -304,6 +335,7 @@ class Camera:
                 break
         with self.lock:
             self.clip_states.clear()
+        self.first_seq = None
         for root in {self.clips_root(), self.default_clips_dir}:
             d = os.path.join(root, "live")
             try:
@@ -356,11 +388,16 @@ class Camera:
     def on_cycle(self, seq, start, end):
         """Collector hook: queue the clip for this cycle (cut once its last second is on disk). Queued
         whenever recording is on, also while ffmpeg is reconnecting: the cut uses what was recorded."""
+        if self.first_seq is None:
+            self.first_seq = seq
         if not (self.info.get("recording") or self._wants_recording()):
             # remember why, as it was at the cycle (the settings may change later)
             self._clip_state(seq, "none", reason="ffmpeg is not installed on the server PC" if not self.ffmpeg
                              else "Camera Recording was OFF (Camera page)")
             return
+        self._queue(seq, start, end)
+
+    def _queue(self, seq, start, end):
         cfg = self.get_cfg()
         pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
         start = max(start, end - dt.timedelta(seconds=MAX_CLIP_S)) - dt.timedelta(seconds=pre)
@@ -376,11 +413,21 @@ class Camera:
         with self.lock:
             if state is None:
                 self.clip_states.pop(seq, None)
-                return
-            start = start or (self.clip_states.get(seq) or {}).get("start")
-            self.clip_states[seq] = {"state": state, "reason": reason, "start": start}
-            while len(self.clip_states) > 500:            # keep the newest cycles only
-                self.clip_states.pop(next(iter(self.clip_states)))
+            else:
+                start = start or (self.clip_states.get(seq) or {}).get("start")
+                self.clip_states[seq] = {"state": state, "reason": reason, "start": start}
+                while len(self.clip_states) > 500:            # keep the newest cycles only
+                    self.clip_states.pop(next(iter(self.clip_states)))
+        path = self._noclip_path(seq)
+        try:
+            if state in ("none", "failed"):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"state": state, "reason": reason}, f)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
 
     def _count(self, key):
         with self.lock:
