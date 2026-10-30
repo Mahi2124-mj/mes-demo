@@ -524,6 +524,31 @@ def live_hourly_loss_breakdown(q):
     return {"date": rd, "shift_name": sh, "slots": slots, "totals": tot}
 
 
+# Sensor Health on MANAGEMENT-2: demo sensors on the station's inputs (no poka-yoke is configured). Each one
+# toggles ON / OFF on its own period so the panel shows live sensors. (no, input, name, register, period s);
+# a name of None comes from Machine Config's digital inputs.
+DEMO_SENSORS = (("PY01", "X4", "Gun", "D404", 3), ("PY02", "X6", None, "D406", 5),
+                ("PY03", "X7", None, "D407", 7), ("PY04", "X10", None, "D410", 11))
+DEMO_SENSOR_NAMES = {"X6": "Reset", "X7": "E-stop healthy", "X10": "Calibration mode"}
+
+
+def live_sensor_health():
+    t = time.time()
+    names = {str(x.get("address") or "").upper(): x.get("signal") for x in machine_cfg().get("inputs") or []}
+    checks = []
+    for no, bit, name, reg, period in DEMO_SENSORS:
+        name = str(name or names.get(bit) or DEMO_SENSOR_NAMES.get(bit, bit)).upper()
+        last = dt.datetime.fromtimestamp(t - t % period).isoformat(timespec="seconds")
+        bit_row = {"bit": bit, "status": "alive", "current_value": int(t // period) % 2,
+                   "last_toggle_at": last, "stuck_for_sec": int(t % period)}
+        checks.append({"py_no": no, "py_name": f"{name} {bit}", "sensing_bits": [bit], "register_addr": reg,
+                       "status": "alive", "stuck_for_sec": int(t % period), "last_toggle_at": last, "bits": [bit_row]})
+    now = dt.datetime.fromtimestamp(t).isoformat(timespec="seconds")
+    return {"line_id": LIVE_LINE_ID, "model_bit": None, "model_name": machine_cfg().get("machine_name"),
+            "swept_at": now, "stuck_threshold_sec": 120, "health": "OK",
+            "counts": {"total": len(checks), "alive": len(checks), "stuck": 0, "unknown": 0}, "checks": checks}
+
+
 def live_ct_histogram(q):
     """CT distribution of the live cycles of the last N days (default 30), 0.1 s buckets."""
     try:
@@ -975,8 +1000,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"line_id": LIVE_LINE_ID, "line_name": LINE["line_name"], "as_of": dt.date.today().isoformat(),
                                "counts": {"overdue": 0, "due": 0, "ok": 0, "no_plan": 0}, "machines": []})
         if p.startswith("/api/poka-yoke/sensor-health/") or p.startswith("/api/poka-yoke/sensor-sweep/"):
-            return self._json({"line_id": LIVE_LINE_ID, "health": "NO_PY",
-                               "counts": {"total": 0, "alive": 0, "stuck": 0, "unknown": 0}, "checks": []})
+            return self._json(live_sensor_health())
         if p.startswith("/api/poka-yoke/bypass-episodes/"):
             rd, sh = _live_pick(q)
             return self._json({"line_id": LIVE_LINE_ID, "date": rd, "shift": sh, "episodes": [], "by_slot": {},

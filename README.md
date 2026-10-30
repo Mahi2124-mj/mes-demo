@@ -128,8 +128,12 @@ The server PC must be on the machine network (192.168.30.x).
 - Box sizes, separately for portrait and landscape: − / + for the KPI band, CT graph + CT distribution,
   CT graph width, hourly table, shift timeline, documents, loss distribution and poka-yoke / sensor.
   "Auto" puts a size back to its automatic value; "Reset box sizes" / "Reset CT seconds" restore all.
-- Poka-yoke box with no checks configured: shows ✓ ALL SET OK; tap it to show "No Checks" (tap again
-  for OK). Saved the same way, for every screen. With real checks it shows pass / fail and opens the detail.
+- Poka-yoke box with no checks configured: shows ✓ ALL SET OK; hold it for 3 s to show "No Checks" (hold
+  again for OK; a short tap does nothing). Saved the same way, for every screen. With real checks it shows
+  pass / fail and opens the detail.
+- Sensor Health shows four demo sensors on the station's inputs: X4 Gun, X6, X7, X10 (names from Machine
+  Config's digital inputs). Each toggles ON / OFF on its own period (3 / 5 / 7 / 11 s); the panel refreshes
+  every 2 s.
 
 ## Documents (MANAGEMENT-2)
 The line's sheets open in a popup: 📄 DOCUMENTS button in the MANAGEMENT-2 header (any layout), or

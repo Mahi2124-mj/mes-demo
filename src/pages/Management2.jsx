@@ -697,6 +697,22 @@ export default function Management2() {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const LP = lay.portrait, LL = lay.landscape;
   const pxOrAuto = (v) => (v ? `${v}px` : "auto");
+  // Poka-yoke box without checks: OK <-> "No Checks" only after holding it for 3 s (no change on a tap)
+  const PY_HOLD_MS = 3000;
+  const [pyHold, setPyHold] = useState(0);            // 0..1 while the box is held
+  const pyHoldRaf = useRef(null);
+  const stopPyHold = () => { cancelAnimationFrame(pyHoldRaf.current); pyHoldRaf.current = null; setPyHold(0); };
+  const startPyHold = (onDone) => {
+    cancelAnimationFrame(pyHoldRaf.current);
+    const t0 = performance.now();
+    const tick = () => {
+      const f = Math.min(1, (performance.now() - t0) / PY_HOLD_MS);
+      if (f >= 1) { pyHoldRaf.current = null; setPyHold(0); onDone(); return; }
+      setPyHold(f);
+      pyHoldRaf.current = requestAnimationFrame(tick);
+    };
+    pyHoldRaf.current = requestAnimationFrame(tick);
+  };
   const isLanPanel = (() => { try { return sessionStorage.getItem("tbdi_lan") === "1"; } catch { return false; } })();
 
   // Live viewport tracking — needed to compute `needsRotation` below.
@@ -1450,7 +1466,7 @@ export default function Management2() {
         .catch(() => {});
     };
     fetchSweep();
-    const t = setInterval(fetchSweep, 10000);
+    const t = setInterval(fetchSweep, 2000);            // the sensors' ON / OFF shows live
     return () => { alive = false; clearInterval(t); };
   }, [lineId]);
 
@@ -4069,7 +4085,7 @@ export default function Management2() {
             const pyFailedCount = pokaStatus.filter(p => p.is_bypassed).length;
             const pyAllOk       = pokaStatus.length > 0 && pyFailedCount === 0;
             const pyEmpty       = pokaStatus.length === 0;
-            // No checks configured: shows OK; a tap switches to "No Checks" and back (saved for every screen)
+            // No checks configured: shows OK; holding it 3 s switches to "No Checks" and back (saved for every screen)
             const pyNoChecks    = pyEmpty && lay.display.poka_no_checks;
             const pyOk          = pyAllOk || (pyEmpty && !pyNoChecks);
             const togglePy      = () => updateLay(prev => ({ ...prev, display: { ...prev.display, poka_no_checks: !prev.display.poka_no_checks } }));
@@ -4090,12 +4106,18 @@ export default function Management2() {
                   )}
                 </div>
                 <button
-                  onClick={pyEmpty ? togglePy : () => setPyModalOpen(true)}
-                  title={pyEmpty ? (pyNoChecks ? "Tap to show OK" : "Tap to show No Checks")
+                  onClick={pyEmpty ? undefined : () => setPyModalOpen(true)}
+                  onPointerDown={pyEmpty ? () => startPyHold(togglePy) : undefined}
+                  onPointerUp={pyEmpty ? stopPyHold : undefined}
+                  onPointerLeave={pyEmpty ? stopPyHold : undefined}
+                  onPointerCancel={pyEmpty ? stopPyHold : undefined}
+                  onContextMenu={pyEmpty ? (e => e.preventDefault()) : undefined}
+                  title={pyEmpty ? (pyNoChecks ? "Hold 3 s to show OK" : "Hold 3 s to show No Checks")
                                 : pyAllOk ? "All poka-yoke checks passing — tap for shift history"
                                           : `${pyFailedCount} check${pyFailedCount!==1?'s':''} failed — tap for detail`}
                   style={{
-                    flex:1, width:"100%", border:"none", cursor: "pointer",
+                    flex:1, width:"100%", border:"none", cursor: "pointer", position:"relative",
+                    touchAction:"none", userSelect:"none", WebkitUserSelect:"none",
                     padding: isPortrait ? "6px 8px" : "12px 14px",
                     background: pyNoChecks ? bgIdle : pyOk ? bgGood : bgBad,
                     display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
@@ -4113,6 +4135,16 @@ export default function Management2() {
                     color: pyNoChecks ? textMut : pyOk ? STATUS_CLR["RUNNING"] : STATUS_CLR["BREAKDOWN"]}}>
                     {pyNoChecks ? "No Checks" : pyOk ? "All Set OK" : `${pyFailedCount} Failed`}
                   </div>
+                  {pyEmpty && pyHold > 0 && (
+                    <>
+                      <div style={{position:"absolute",top:6,right:8,fontSize:10,fontWeight:800,color:textSub,
+                                   fontFamily:"monospace"}}>
+                        Hold {Math.ceil((1 - pyHold) * PY_HOLD_MS / 1000)} s
+                      </div>
+                      <div style={{position:"absolute",left:0,bottom:0,height:4,width:`${pyHold * 100}%`,
+                                   background:STATUS_CLR["SETUP"]}}/>
+                    </>
+                  )}
                   <div style={{fontSize: isPortrait ? 8 : 11, fontWeight:700,color:textMut,letterSpacing:".05em",textTransform:"uppercase",
                     textAlign:"center", lineHeight:1.1}}>
                     Poka-Yoke {pokaStatus.length>0 && `· ${pokaStatus.length} check${pokaStatus.length!==1?'s':''}`}
