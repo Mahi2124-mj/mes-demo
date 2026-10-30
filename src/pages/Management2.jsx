@@ -1202,7 +1202,7 @@ export default function Management2() {
     } catch { vidSrcRef.current = null; }
   }, []);
 
-  // A clip that is still being saved: check every 2 s and play it as soon as it is there.
+  // A clip that is still being saved: check every second and play it as soon as it is there.
   const waitClip = videoModal?._waitClip;
   useEffect(() => {
     if (!waitClip) return undefined;
@@ -1226,10 +1226,10 @@ export default function Management2() {
         }
       } catch { /* server busy: try again */ }
       if (!alive) return;
-      if (tries >= 150) { done({ error: "📷 The video for this cycle was not saved" }); return; }
-      timer = setTimeout(tick, 2000);
+      if (tries >= 300) { done({ error: "📷 The video for this cycle was not saved" }); return; }
+      timer = setTimeout(tick, 1000);
     };
-    timer = setTimeout(tick, 1500);
+    timer = setTimeout(tick, 800);
     return () => { alive = false; clearTimeout(timer); };
   }, [waitClip]); // eslint-disable-line
 

@@ -1129,7 +1129,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"detail": "cycle_seq required"}, 400)
             full = CAMERA.clip_path(seq)
             if not full:                     # why: still being saved, failed, or never recorded
-                return self._json({"detail": "No clip for this cycle", **CAMERA.clip_status(seq)}, 404)
+                st = CAMERA.clip_status(seq)
+                if st["state"] == "queued":
+                    CAMERA.hurry(seq)        # someone is waiting for it: cut it before the others
+                return self._json({"detail": "No clip for this cycle", **st}, 404)
             return self._file(full, cache="private, max-age=86400", extra={"X-Clip-Source": "archive", "X-Video-Offset": "0"})
         if tail == "comments-history":
             return self._json(comments_history())

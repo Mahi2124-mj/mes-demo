@@ -43,6 +43,16 @@ VCODEC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-pix_fmt", "y
           "-vf", "scale='min(1280,iw)':-2"]
 
 
+def video_kind(ffmpeg_info):
+    """The camera's video from ffmpeg's stream line: "h264" for the H.264 every browser plays (8-bit 4:2:0),
+    else the codec plus its pixel format ("hevc", "h264 yuv444p", ...)."""
+    m = re.search(r"Video: (\w+)[^,\n]*(?:, (\w+))?", ffmpeg_info)
+    if not m:
+        return None
+    codec, pix = m.group(1), m.group(2) or ""
+    return codec if codec != "h264" or pix in ("yuv420p", "yuvj420p", "") else f"{codec} {pix}"
+
+
 def find_ffmpeg(here):
     env = os.environ.get("MES_FFMPEG")
     if env and os.path.isfile(env):
@@ -172,9 +182,11 @@ class Camera:
         self.clip_states = {}                # seq -> {"state": queued | cutting | failed, "reason", "start"} until saved
         self.first_seq = None                # first cycle the collector reported since this server start
         self.seg_pts = {}                    # segment file -> its first timestamp (continuous within a recording run)
+        self.seg_codec = {}                  # segment file -> video codec the camera sent ("h264", "hevc", ...)
+        self.seg_keys = {}                   # (segment file, size) -> keyframe times in it (s from its start)
         self.info = {"state": "starting", "last_error": None, "recording": False, "preview": False,
                      "ffmpeg": self.ffmpeg, "clips_cut": 0, "clips_failed": 0, "last_clip": None,
-                     "last_clip_error": None, "source": None, "camera_codec": None}
+                     "last_clip_error": None, "last_clip_delay_s": None, "source": None, "camera_codec": None}
 
     # ----- paths -----
     def clips_root(self):
@@ -348,7 +360,7 @@ class Camera:
                         os.remove(os.path.join(d, n))
                     except OSError:
                         pass
-        self._set(clips_cut=0, clips_failed=0, last_clip=None, last_clip_error=None)
+        self._set(clips_cut=0, clips_failed=0, last_clip=None, last_clip_error=None, last_clip_delay_s=None)
 
     def stop(self):
         self._kill()
@@ -401,21 +413,33 @@ class Camera:
         cfg = self.get_cfg()
         pre, post = float(cfg.get("pre_roll_s") or 0), float(cfg.get("post_roll_s") or 0)
         start = max(start, end - dt.timedelta(seconds=MAX_CLIP_S)) - dt.timedelta(seconds=pre)
-        self._clip_state(seq, "queued", start=start)
-        self.clips.put((seq, start, end + dt.timedelta(seconds=post), 0, 0.0))
+        job = (seq, start, end + dt.timedelta(seconds=post), 0, 0.0)
+        self._clip_state(seq, "queued", start=start, job=job)
+        self.clips.put(job)
+
+    def hurry(self, seq):
+        """Someone opened this cycle's video: cut it now instead of after the clips queued before it."""
+        with self.lock:
+            st = self.clip_states.get(int(seq))
+            job = st.get("job") if st and st["state"] == "queued" and not st.get("hurried") else None
+            if job:
+                st["hurried"] = True
+        if job:
+            threading.Thread(target=self._run_clip, args=job, name=f"cam-clip-{seq}", daemon=True).start()
 
     def _wants_recording(self):
         cfg = self.get_cfg()
         ip = "demo" if self.demo == "synthetic" else str(cfg.get("ip") or "").strip()
         return (bool(cfg.get("recording_enabled")) or bool(self.demo)) and bool(ip) and bool(self.ffmpeg)
 
-    def _clip_state(self, seq, state, reason=None, start=None):
+    def _clip_state(self, seq, state, reason=None, start=None, job=None):
         with self.lock:
             if state is None:
                 self.clip_states.pop(seq, None)
             else:
-                start = start or (self.clip_states.get(seq) or {}).get("start")
-                self.clip_states[seq] = {"state": state, "reason": reason, "start": start}
+                old = self.clip_states.get(seq) or {}
+                self.clip_states[seq] = {"state": state, "reason": reason, "start": start or old.get("start"),
+                                         "job": job or old.get("job")}
                 while len(self.clip_states) > 500:            # keep the newest cycles only
                     self.clip_states.pop(next(iter(self.clip_states)))
         path = self._noclip_path(seq)
@@ -652,25 +676,33 @@ class Camera:
 
     def _clipper(self):
         while True:
-            seq, start, end, attempt, not_before = self.clips.get()
-            wait = max((end - dt.datetime.now()).total_seconds() + LATENCY_S + 1.5, not_before - time.time())
-            if wait > 0:
-                time.sleep(wait)
-            self._clip_state(seq, "cutting")
-            try:
-                self._cut(seq, start, end)
-                self._clip_state(seq, None)
-                self._count("clips_cut")
-                self._set(last_clip=seq, last_clip_error=None)
-            except Exception as e:  # noqa: BLE001
-                if attempt == 0:                     # e.g. the camera was reconnecting: try once more
-                    self._clip_state(seq, "queued", reason=f"retrying: {e}")
-                    self.clips.put((seq, start, end, 1, time.time() + 5))
-                    continue
-                self._clip_state(seq, "failed", reason=str(e))
-                self._count("clips_failed")
-                self._set(last_clip_error=f"cycle {seq}: {e}")
-                print(f"[camera] no clip for cycle {seq}: {e}", flush=True)
+            self._run_clip(*self.clips.get())
+
+    def _run_clip(self, seq, start, end, attempt, not_before):
+        wait = max((end - dt.datetime.now()).total_seconds() + LATENCY_S + 1.5, not_before - time.time())
+        if wait > 0:
+            time.sleep(wait)
+        with self.lock:                      # the queue and hurry() may both get here: cut it once
+            st = self.clip_states.get(seq)
+            if not st or st["state"] != "queued":
+                return
+            st["state"] = "cutting"
+        try:
+            self._cut(seq, start, end)
+            self._clip_state(seq, None)
+            self._count("clips_cut")
+            self._set(last_clip=seq, last_clip_error=None,
+                      last_clip_delay_s=round((dt.datetime.now() - end).total_seconds(), 1))
+        except Exception as e:  # noqa: BLE001
+            if attempt == 0:                     # e.g. the camera was reconnecting: try once more
+                job = (seq, start, end, 1, time.time() + 5)
+                self._clip_state(seq, "queued", reason=f"retrying: {e}", job=job)
+                self.clips.put(job)
+                return
+            self._clip_state(seq, "failed", reason=str(e))
+            self._count("clips_failed")
+            self._set(last_clip_error=f"cycle {seq}: {e}")
+            print(f"[camera] no clip for cycle {seq}: {e}", flush=True)
 
     # ----- clips: pre-encoded chunks -----
     # While recording, every finished segment is converted to an H.264 chunk in the background. A clip is
@@ -718,13 +750,53 @@ class Camera:
         try:                                 # ffmpeg's "Duration: 00:00:04.00, start: 17.680000," line
             r = subprocess.run([self.ffmpeg, "-hide_banner", "-nostdin", "-i", seg_name], cwd=self.seg_dir(),
                                stdin=subprocess.DEVNULL, capture_output=True, timeout=10, creationflags=NO_WINDOW)
-            v = float(re.search(r"start: (-?[\d.]+)", r.stderr.decode("utf-8", "replace")).group(1))
+            out = r.stderr.decode("utf-8", "replace")
+            v = float(re.search(r"start: (-?[\d.]+)", out).group(1))
         except (OSError, AttributeError, ValueError, subprocess.TimeoutExpired):
             return None
         if len(self.seg_pts) > 2000:
             self.seg_pts.clear()
+            self.seg_codec.clear()
         self.seg_pts[seg_name] = v
+        kind = video_kind(out)
+        if kind:
+            self.seg_codec[seg_name] = kind
         return v
+
+    def _keyframes(self, seg_name):
+        """Keyframe times in a segment, in seconds from its first frame (read from the packets, no decoding)."""
+        try:
+            key = (seg_name, os.path.getsize(os.path.join(self.seg_dir(), seg_name)))
+        except OSError:
+            return [0.0]
+        if key in self.seg_keys:
+            return self.seg_keys[key]
+        try:   # framecrc: one line per packet; a keyframe has no "F=" flags or an odd one
+            r = subprocess.run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-i", seg_name,
+                                "-map", "0:v:0", "-c", "copy", "-f", "framecrc", "-"], cwd=self.seg_dir(),
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=20, creationflags=NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired):
+            return [0.0]
+        tb, keys = 1 / 90000, []
+        for line in r.stdout.decode("utf-8", "replace").splitlines():
+            m = re.match(r"#tb 0: (\d+)/(\d+)", line)
+            if m:
+                tb = int(m.group(1)) / int(m.group(2))
+                continue
+            f = line.split(",")
+            if line.startswith("#") or len(f) < 5:
+                continue
+            flags = re.search(r"F=0x([0-9A-Fa-f]+)", line)
+            if not flags or int(flags.group(1), 16) & 1:
+                try:
+                    keys.append(int(f[2]) * tb)
+                except ValueError:
+                    pass
+        keys = sorted(keys) or [0.0]
+        if len(self.seg_keys) > 2000:
+            self.seg_keys.clear()
+        self.seg_keys[key] = keys
+        return keys
 
     def _encode_chunks(self):
         while True:
@@ -735,10 +807,13 @@ class Camera:
                 segs = self._segments()
                 horizon = dt.datetime.now() - dt.timedelta(seconds=MAX_CLIP_S + 60)
                 for (t0, name), _ in zip(segs, segs[1:]):      # the newest segment is still being written
-                    if t0 >= horizon and not self._chunk_of(name):
+                    if t0 < horizon:
+                        continue
+                    self._pts(name)                              # warm the caches the cut reads
+                    if self.seg_codec.get(name) == "h264":       # copied as it is: no chunk needed
+                        self._keyframes(name)
+                    elif not self._chunk_of(name):
                         self._encode_piece(name, None, None, os.path.join(self.chunk_dir(), name + ".mp4"))
-                    if t0 >= horizon:
-                        self._pts(name)                          # warm the cache the cut reads
             except Exception:  # noqa: BLE001 - a bad segment must not stop the chunks
                 pass
 
@@ -782,10 +857,12 @@ class Camera:
         if not use:
             raise RuntimeError("no recorded video for this time")
         if run not in self.run_codec:
-            self.run_codec[run] = self._codec_of(use[0][2])
+            self.run_codec[run] = self.seg_codec.get(use[0][2]) or self._codec_of(use[0][2])
             self._set(camera_codec=self.run_codec[run])
-        # Encoded to H.264 at the exact first and last frame (a stream copy could only start on a camera
-        # keyframe, 1-4 s off), and H.265 cameras become H.264, the only codec every browser plays.
+        if self.run_codec[run] == "h264":
+            return self._cut_copy(seq, start, end, use)
+        # Other codecs (H.265) are encoded to H.264, the only codec every browser plays, at the exact first
+        # and last frame.
         work = os.path.join(self.chunk_dir(), f".clip_{seq}")
         shutil.rmtree(work, ignore_errors=True)
         pieces, errors = [], []
@@ -835,6 +912,45 @@ class Camera:
             shutil.rmtree(work, ignore_errors=True)
         self._write_info(final, start=start.isoformat(timespec="milliseconds"), end=end.isoformat(timespec="milliseconds"))
 
+    def _cut_copy(self, seq, start, end, use):
+        """H.264 camera: the clip is the camera's own video, copied without re-encoding, so it is ready at
+        once and costs no CPU. It starts at the keyframe before the cycle; an MP4 edit list makes players
+        start at the cycle's first frame, so the clip plays exactly the cycle time."""
+        t_first = use[0][0]
+        a = max(0.0, (start - t_first).total_seconds())             # cycle start, in the first segment
+        k = max([x for x in self._keyframes(use[0][2]) if x <= a + 0.001] or [0.0])
+        ss = max(0.0, k - 0.02)              # read from just before that keyframe: it is the first frame kept
+        dur = (end - t_first).total_seconds() - a
+        src = "concat:" + "|".join(name for _, _, name in use)
+        out_dir = self.live_dir()
+        os.makedirs(out_dir, exist_ok=True)
+        tmp = os.path.join(out_dir, f".cycle_{seq}.tmp.mp4")
+        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{ss:.3f}",
+               "-itsoffset", f"{ss - a:.3f}", "-i", src, "-t", f"{dur:.3f}", "-map", "0:v:0", "-an", "-c", "copy",
+               "-movflags", "+faststart", "-f", "mp4", tmp]
+        ok, err = False, "ffmpeg failed"
+        for i in range(7):                   # the last second may not be on disk yet: wait for it, up to 6 s
+            if i:
+                time.sleep(1.0)
+            r = subprocess.run(cmd, cwd=self.seg_dir(), stdin=subprocess.DEVNULL, capture_output=True,
+                               timeout=120, creationflags=NO_WINDOW)
+            ok = r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) >= 1024
+            if not ok:
+                err = (r.stderr.decode("utf-8", "replace").strip().splitlines() or [err])[-1][:200]
+                continue
+            got = self._duration_of(tmp)
+            if got is not None and got >= dur - 0.06:
+                break
+        if not ok:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise RuntimeError(err)
+        final = os.path.join(out_dir, f"cycle_{seq}.mp4")
+        os.replace(tmp, final)
+        self._write_info(final, start=start.isoformat(timespec="milliseconds"), end=end.isoformat(timespec="milliseconds"))
+
     def _codec_of(self, seg_name):
         """Video codec in a recorded segment ("h264", "hevc", ...), read from ffmpeg's stream info."""
         try:
@@ -842,8 +958,7 @@ class Camera:
                                stdin=subprocess.DEVNULL, capture_output=True, timeout=20, creationflags=NO_WINDOW)
         except (OSError, subprocess.TimeoutExpired):
             return None
-        m = re.search(r"Video: (\w+)", r.stderr.decode("utf-8", "replace"))
-        return m.group(1) if m else None
+        return video_kind(r.stderr.decode("utf-8", "replace"))
 
     def _janitor(self):
         while True:
