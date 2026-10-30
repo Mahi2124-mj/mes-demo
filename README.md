@@ -111,15 +111,17 @@ The server PC must be on the machine network (192.168.30.x).
   0 s) is saved as H.264 in `clips/live/cycle_<seq>.mp4`, so the clip is as long as the cycle time;
   MANAGEMENT-2 plays it like the recorded clips.
 - Fast clips, H.264 camera (8-bit 4:2:0, what IP cameras send): the clip is the camera's own video,
-  copied without re-encoding — no CPU load, ready about 2-5 s after the OK/NG signal however long the
-  cycle was. It starts at the camera keyframe before the cycle; an MP4 edit list makes the player start at
+  copied without re-encoding — no CPU load, ready about 2-4 s after the OK/NG signal however long the
+  cycle was (if the camera's last second is not on disk yet, that part is added a few seconds later). It starts at the camera keyframe before the cycle; an MP4 edit list makes the player start at
   the cycle's first frame, so it plays exactly the cycle time. Clips have the camera's resolution and
   bitrate (disk use: Camera page → retention days).
-- H.265 (or another format): each finished segment is encoded to H.264 in the background
-  (`clips/live/seg/enc/`); at the signal only the first and last few seconds are encoded and joined to
+- H.265 (or another format): each finished segment is encoded to H.264 (960 px wide) in the background
+  (`clips/live/seg/enc960/`); at the signal only the first and last few seconds are encoded and joined to
   those chunks: also ready about 3-5 s after the signal, but it keeps one CPU core partly busy.
 - Opening a cycle whose clip is still waiting moves it ahead of the other clips; the popup checks every
-  second and plays it as soon as it is saved. Collector Data shows how long the last clip took.
+  second and plays it as soon as it is saved; it says how many clips are before it, and if the camera sends
+  H.265, that setting the camera to H.264 makes clips fast. Collector Data and the server window show how
+  long each clip took.
 - Recording OFF: no clips; the preview opens the stream only while someone is watching.
 - Every cycle gets a clip while recording is on, also when the camera is reconnecting at that moment
   (the clip then has what was recorded). A failed cut is retried once; two clips can be cut at a time.

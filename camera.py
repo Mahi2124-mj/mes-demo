@@ -40,7 +40,7 @@ NO_WINDOW = 0x08000000 if os.name == "nt" else 0       # CREATE_NO_WINDOW
 # Every clip piece is encoded with exactly these settings, so pieces can be joined without re-encoding.
 # (No B-frames: each piece starts and ends cleanly.)
 VCODEC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-pix_fmt", "yuv420p", "-bf", "0",
-          "-vf", "scale='min(1280,iw)':-2"]
+          "-vf", "scale='min(960,iw)':-2"]
 
 
 def video_kind(ffmpeg_info):
@@ -300,6 +300,10 @@ class Camera:
         with self.lock:
             st = self.clip_states.get(seq)
         st = st or self._read_noclip(seq)
+        if st and st["state"] in ("queued", "cutting"):
+            with self.lock:
+                ahead = sum(1 for n, x in self.clip_states.items() if n < seq and x["state"] in ("queued", "cutting"))
+            return {"state": st["state"], "reason": st["reason"], "ahead": ahead, "codec": self.info.get("camera_codec")}
         if st:
             return {"state": st["state"], "reason": st["reason"]}
         if not self.ffmpeg:
@@ -679,7 +683,8 @@ class Camera:
             self._run_clip(*self.clips.get())
 
     def _run_clip(self, seq, start, end, attempt, not_before):
-        wait = max((end - dt.datetime.now()).total_seconds() + LATENCY_S + 1.5, not_before - time.time())
+        settle = 0.5 if self.info.get("camera_codec") == "h264" else 1.5     # copied clips are completed later
+        wait = max((end - dt.datetime.now()).total_seconds() + LATENCY_S + settle, not_before - time.time())
         if wait > 0:
             time.sleep(wait)
         with self.lock:                      # the queue and hurry() may both get here: cut it once
@@ -691,8 +696,10 @@ class Camera:
             self._cut(seq, start, end)
             self._clip_state(seq, None)
             self._count("clips_cut")
-            self._set(last_clip=seq, last_clip_error=None,
-                      last_clip_delay_s=round((dt.datetime.now() - end).total_seconds(), 1))
+            delay = round((dt.datetime.now() - end).total_seconds(), 1)
+            self._set(last_clip=seq, last_clip_error=None, last_clip_delay_s=delay)
+            how = "copied" if self.info.get("camera_codec") == "h264" else f"re-encoded from {self.info.get('camera_codec')}"
+            print(f"[camera] cycle {seq}: clip ready {delay} s after the cycle ({how})", flush=True)
         except Exception as e:  # noqa: BLE001
             if attempt == 0:                     # e.g. the camera was reconnecting: try once more
                 job = (seq, start, end, 1, time.time() + 5)
@@ -709,7 +716,7 @@ class Camera:
     # then its first and last few seconds (encoded at the exact frame) joined to the chunks in between
     # without re-encoding, so it is ready a few seconds after the cycle however long the cycle was.
     def chunk_dir(self):
-        return os.path.join(self.seg_dir(), "enc")
+        return os.path.join(self.seg_dir(), "enc960")
 
     def _chunk_of(self, seg_name):
         """The finished chunk for a segment, or None (missing, or older than the segment file)."""
@@ -817,7 +824,7 @@ class Camera:
             except Exception:  # noqa: BLE001 - a bad segment must not stop the chunks
                 pass
 
-    def _cut(self, seq, start, end):
+    def _cut(self, seq, start, end, refine=False):
         # Segment times are arrival times, so look for the picture where it arrived.
         start += dt.timedelta(seconds=LATENCY_S)
         end += dt.timedelta(seconds=LATENCY_S)
@@ -860,7 +867,9 @@ class Camera:
             self.run_codec[run] = self.seg_codec.get(use[0][2]) or self._codec_of(use[0][2])
             self._set(camera_codec=self.run_codec[run])
         if self.run_codec[run] == "h264":
-            return self._cut_copy(seq, start, end, use)
+            return self._cut_copy(seq, start, end, use, refine)
+        if refine:
+            return None
         # Other codecs (H.265) are encoded to H.264, the only codec every browser plays, at the exact first
         # and last frame.
         work = os.path.join(self.chunk_dir(), f".clip_{seq}")
@@ -912,7 +921,7 @@ class Camera:
             shutil.rmtree(work, ignore_errors=True)
         self._write_info(final, start=start.isoformat(timespec="milliseconds"), end=end.isoformat(timespec="milliseconds"))
 
-    def _cut_copy(self, seq, start, end, use):
+    def _cut_copy(self, seq, start, end, use, refine=False):
         """H.264 camera: the clip is the camera's own video, copied without re-encoding, so it is ready at
         once and costs no CPU. It starts at the keyframe before the cycle; an MP4 edit list makes players
         start at the cycle's first frame, so the clip plays exactly the cycle time."""
@@ -924,14 +933,17 @@ class Camera:
         src = "concat:" + "|".join(name for _, _, name in use)
         out_dir = self.live_dir()
         os.makedirs(out_dir, exist_ok=True)
-        tmp = os.path.join(out_dir, f".cycle_{seq}.tmp.mp4")
+        tmp = os.path.join(out_dir, f".cycle_{seq}{'.r' if refine else ''}.tmp.mp4")
+        final = os.path.join(out_dir, f"cycle_{seq}.mp4")
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{ss:.3f}",
                "-itsoffset", f"{ss - a:.3f}", "-i", src, "-t", f"{dur:.3f}", "-map", "0:v:0", "-an", "-c", "copy",
                "-movflags", "+faststart", "-f", "mp4", tmp]
-        ok, err = False, "ffmpeg failed"
-        for i in range(7):                   # the last second may not be on disk yet: wait for it, up to 6 s
+        ok, got, err = False, None, "ffmpeg failed"
+        # Saved as soon as it is complete, or after ~2 s with what is on disk (the camera's last second can
+        # arrive late); a short clip is completed a few seconds later in the background.
+        for i in range(1 if refine else 4):
             if i:
-                time.sleep(1.0)
+                time.sleep(0.5)
             r = subprocess.run(cmd, cwd=self.seg_dir(), stdin=subprocess.DEVNULL, capture_output=True,
                                timeout=120, creationflags=NO_WINDOW)
             ok = r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) >= 1024
@@ -941,15 +953,35 @@ class Camera:
             got = self._duration_of(tmp)
             if got is not None and got >= dur - 0.06:
                 break
-        if not ok:
+        old = (self._read_info(final) or {}).get("duration") if refine else None
+        if not ok or (refine and (got is None or (old is not None and got <= old + 0.05))):
             try:
                 os.remove(tmp)
             except OSError:
                 pass
+            if refine:
+                return
             raise RuntimeError(err)
-        final = os.path.join(out_dir, f"cycle_{seq}.mp4")
-        os.replace(tmp, final)
+        try:
+            os.replace(tmp, final)
+        except OSError:
+            if not refine:
+                raise
+            try:                             # Windows: the clip is playing right now: keep the first version
+                os.remove(tmp)
+            except OSError:
+                pass
+            return
         self._write_info(final, start=start.isoformat(timespec="milliseconds"), end=end.isoformat(timespec="milliseconds"))
+        if not refine and (got is None or got < dur - 0.06):
+            lat = dt.timedelta(seconds=LATENCY_S)
+            threading.Timer(6.0, self._refine, args=(seq, start - lat, end - lat)).start()
+
+    def _refine(self, seq, start, end):
+        try:
+            self._cut(seq, start, end, refine=True)
+        except Exception:  # noqa: BLE001 - the first version stays
+            pass
 
     def _codec_of(self, seg_name):
         """Video codec in a recorded segment ("h264", "hevc", ...), read from ffmpeg's stream info."""
@@ -970,6 +1002,7 @@ class Camera:
 
     def _clean(self):
         now = dt.datetime.now()
+        shutil.rmtree(os.path.join(self.seg_dir(), "enc"), ignore_errors=True)   # chunks of the older 1280 size
         with self.lock:                      # segments a queued clip still needs are kept
             pending = [st["start"] for st in self.clip_states.values() if st["state"] in ("queued", "cutting") and st["start"]]
         keep_from = min(pending) - dt.timedelta(seconds=60) if pending else now

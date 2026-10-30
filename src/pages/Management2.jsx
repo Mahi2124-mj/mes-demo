@@ -103,6 +103,15 @@ function ctAxisMax(values, ideal) {
   return Math.ceil(Math.max(id * 2, Math.min(top * 1.1, id * 6)) / 10) * 10;
 }
 
+// A live clip that is not saved yet: what the popup says while it waits.
+function clipSavingMsg(j) {
+  const n = j && j.ahead > 0 ? ` (${j.ahead} clip${j.ahead > 1 ? "s" : ""} before it)` : "";
+  const slow = j && j.codec && j.codec !== "h264"
+    ? ` The camera sends ${String(j.codec).toUpperCase()}, so clips are re-encoded, which is slow on this PC: set the camera's video encoding to H.264 for clips in a few seconds.`
+    : "";
+  return `⏳ This cycle's video is still being saved${n}. It opens by itself.${slow}`;
+}
+
 function realCycleExtremes(cycles, ideal, fallback) {
   const id = Number(ideal) > 0 ? Number(ideal) : 15;
   const lo = id * 0.5;      // phantom floor (scan-fail warm-up, ~5-8s)
@@ -1223,6 +1232,10 @@ export default function Management2() {
         if (j.state && j.state !== "queued" && j.state !== "cutting") {
           done({ error: `📷 No video for this cycle: ${j.reason || "not recorded"}` });
           return;
+        }
+        if (j.state) {
+          const msg = clipSavingMsg(j);
+          setVideoModal(m => (m && m._waitClip === waitClip && m.error !== msg ? { ...m, error: msg } : m));
         }
       } catch { /* server busy: try again */ }
       if (!alive) return;
@@ -4873,7 +4886,7 @@ export default function Management2() {
                           setVideoModal(m => m ? {
                             ...m, video_url: null, _lastUrl: null,
                             _waitClip: saving ? src : null,
-                            error: saving ? "⏳ This cycle's video is still being saved. It opens by itself."
+                            error: saving ? clipSavingMsg(j)
                                           : `📷 No video for this cycle: ${j.reason || "not recorded"}`,
                           } : m);
                         } else if (r.status === 503) {
