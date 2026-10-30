@@ -549,6 +549,83 @@ def live_sensor_health():
             "counts": {"total": len(checks), "alive": len(checks), "stuck": 0, "unknown": 0}, "checks": checks}
 
 
+# Poka-yoke on MANAGEMENT-2: demo checks. OK state: all pass; NG state (holding the box 3 s on the dashboard
+# switches it, saved as display.poka_ng in dashboard_layout.json): two checks fail, with short failures in
+# the two slots before as history.
+DEMO_PY = (("PY-01", "GUN IN STAND", "X0"), ("PY-02", "NUT SEATED A", "X1"), ("PY-03", "NUT SEATED B", "X2"),
+           ("PY-04", "TORQUE OK", "X3"), ("PY-05", "E-STOP HEALTHY", "X7"))
+DEMO_PY_NG = ("PY-02", "PY-04")
+PY_NG_SINCE = [None]                         # when the NG state was switched on
+
+
+def _py_ng():
+    ng = bool((_load("dashboard_layout.json", {}).get("display") or {}).get("poka_ng"))
+    if not ng:
+        PY_NG_SINCE[0] = None
+    elif PY_NG_SINCE[0] is None:
+        try:
+            PY_NG_SINCE[0] = dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(DATA, "dashboard_layout.json")))
+        except OSError:
+            PY_NG_SINCE[0] = dt.datetime.now()
+    return ng
+
+
+def live_poka_status():
+    ng, model = _py_ng(), machine_cfg().get("machine_name")
+    since = PY_NG_SINCE[0].isoformat(timespec="seconds") if ng else None
+    out = []
+    for i, (no, name, bit) in enumerate(DEMO_PY, 1):
+        bad = ng and no in DEMO_PY_NG
+        out.append({"id": 9000 + i, "poka_yoke_no": no, "poka_yoke_name": f"{name} {bit}", "machine_name": model,
+                    "side": None, "bit": bit, "value": 0 if bad else 1, "alert_level": "NG" if bad else "OK",
+                    "source": "demo", "is_bypassed": bad, "last_bypass_at": since if bad else None,
+                    "last_plc_value": 0 if bad else 1, "bypass_context": {"py_name": f"{name} {bit}"} if bad else None,
+                    "current_model": model, "current_model_bit": None})
+    return out
+
+
+def live_bypass_episodes(q):
+    rd, sh = _live_pick(q)
+    out = {"line_id": LIVE_LINE_ID, "date": rd, "shift": sh, "episodes": [], "by_slot": {}, "slot_summary": {},
+           "merge_gap_sec": 60}
+    if not _py_ng():
+        return out
+    names = {no: f"{name} {bit}" for no, name, bit in DEMO_PY}
+    now = dt.datetime.now()
+    iso = lambda t: t.isoformat(timespec="seconds")
+
+    def add(label, eps):
+        out["episodes"].extend(eps)
+        out["by_slot"][label] = eps
+        secs = [((e["_to"] or now) - e["_from"]).total_seconds() for e in eps]
+        out["slot_summary"][label] = {"episodes": len(eps), "distinct_py": len({e["py_no"] for e in eps}),
+                                      "total_bypass_sec": round(sum(secs)), "longest_sec": round(max(secs)),
+                                      "ongoing_count": sum(e["end_at"] is None for e in eps)}
+        for e in eps:
+            del e["_from"], e["_to"]
+
+    slots = [(sl, *_live_slot_bounds(rd, sh, sl)) for sl in _live_slots(rd, sh)]
+    # history: a 4 min failure of each NG check in the last two finished slots
+    for sl, s0, s1 in [x for x in slots if x[2] <= now and x[2] - x[1] >= dt.timedelta(minutes=5)][-2:]:
+        eps = []
+        for k, no in enumerate(DEMO_PY_NG):
+            a = min(s0 + dt.timedelta(minutes=12 + 20 * k), s1 - dt.timedelta(minutes=5))
+            b = a + dt.timedelta(minutes=4)
+            eps.append({"py_no": no, "py_name": names[no], "alert": "CRITICAL", "start_at": iso(a), "end_at": iso(b),
+                        "slot_segment_from": iso(a), "slot_segment_to": iso(b), "starts_here": True,
+                        "ends_here": True, "ongoing_now": False, "hit_count": 3, "slot": sl["slot_label"],
+                        "_from": a, "_to": b})
+        add(sl["slot_label"], eps)
+    for sl, s0, s1 in [x for x in slots if x[1] <= now < x[2]]:  # now: the NG checks are failing
+        since = PY_NG_SINCE[0] or now
+        a = max(since, s0)
+        add(sl["slot_label"], [{"py_no": no, "py_name": names[no], "alert": "CRITICAL", "start_at": iso(since),
+                                "end_at": None, "slot_segment_from": iso(a), "slot_segment_to": None,
+                                "starts_here": since >= s0, "ends_here": False, "ongoing_now": True, "hit_count": 1,
+                                "slot": sl["slot_label"], "_from": a, "_to": None} for no in DEMO_PY_NG])
+    return out
+
+
 def live_ct_histogram(q):
     """CT distribution of the live cycles of the last N days (default 30), 0.1 s buckets."""
     try:
@@ -1002,9 +1079,9 @@ class Handler(BaseHTTPRequestHandler):
         if p.startswith("/api/poka-yoke/sensor-health/") or p.startswith("/api/poka-yoke/sensor-sweep/"):
             return self._json(live_sensor_health())
         if p.startswith("/api/poka-yoke/bypass-episodes/"):
-            rd, sh = _live_pick(q)
-            return self._json({"line_id": LIVE_LINE_ID, "date": rd, "shift": sh, "episodes": [], "by_slot": {},
-                               "slot_summary": {}, "merge_gap_sec": 60})
+            return self._json(live_bypass_episodes(q))
+        if p.startswith("/api/poka-yoke/live/"):
+            return self._json(live_poka_status())
         if p.startswith("/api/poka-yoke/"):
             return self._json([])
         tail = "/".join(parts[4:])

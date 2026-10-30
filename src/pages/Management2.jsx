@@ -701,6 +701,8 @@ export default function Management2() {
   const PY_HOLD_MS = 3000;
   const [pyHold, setPyHold] = useState(0);            // 0..1 while the box is held
   const pyHoldRaf = useRef(null);
+  const pyHeld = useRef(false);                       // a finished hold must not also open the detail
+  const pokaRefetch = useRef(null);
   const stopPyHold = () => { cancelAnimationFrame(pyHoldRaf.current); pyHoldRaf.current = null; setPyHold(0); };
   const startPyHold = (onDone) => {
     cancelAnimationFrame(pyHoldRaf.current);
@@ -1402,6 +1404,7 @@ export default function Management2() {
         .then(r => setPokaStatus(Array.isArray(r.data) ? r.data : []))
         .catch(() => {});
     };
+    pokaRefetch.current = fetchPoka;
     fetchPoka();
     const t = setInterval(fetchPoka, 5000);
     return () => clearInterval(t);
@@ -4085,10 +4088,14 @@ export default function Management2() {
             const pyFailedCount = pokaStatus.filter(p => p.is_bypassed).length;
             const pyAllOk       = pokaStatus.length > 0 && pyFailedCount === 0;
             const pyEmpty       = pokaStatus.length === 0;
-            // No checks configured: shows OK; holding it 3 s switches to "No Checks" and back (saved for every screen)
-            const pyNoChecks    = pyEmpty && lay.display.poka_no_checks;
-            const pyOk          = pyAllOk || (pyEmpty && !pyNoChecks);
-            const togglePy      = () => updateLay(prev => ({ ...prev, display: { ...prev.display, poka_no_checks: !prev.display.poka_no_checks } }));
+            const pyNoChecks    = pyEmpty;
+            const pyOk          = pyAllOk;
+            // Demo checks: holding the box 3 s switches them between OK and NG (saved for every screen)
+            const togglePy      = () => {
+              pyHeld.current = true;
+              updateLay(prev => ({ ...prev, display: { ...prev.display, poka_ng: !prev.display.poka_ng } }));
+              setTimeout(() => pokaRefetch.current && pokaRefetch.current(), 1200);   // after the save
+            };
             const bgGood        = `${STATUS_CLR["RUNNING"]}14`;
             const bgBad         = `${STATUS_CLR["BREAKDOWN"]}22`;
             const bgIdle        = D ? "#141e2e" : "#e2e8f0";
@@ -4106,13 +4113,13 @@ export default function Management2() {
                   )}
                 </div>
                 <button
-                  onClick={pyEmpty ? undefined : () => setPyModalOpen(true)}
-                  onPointerDown={pyEmpty ? () => startPyHold(togglePy) : undefined}
-                  onPointerUp={pyEmpty ? stopPyHold : undefined}
-                  onPointerLeave={pyEmpty ? stopPyHold : undefined}
-                  onPointerCancel={pyEmpty ? stopPyHold : undefined}
-                  onContextMenu={pyEmpty ? (e => e.preventDefault()) : undefined}
-                  title={pyEmpty ? (pyNoChecks ? "Hold 3 s to show OK" : "Hold 3 s to show No Checks")
+                  onClick={() => { if (pyHeld.current) { pyHeld.current = false; return; } if (!pyEmpty) setPyModalOpen(true); }}
+                  onPointerDown={() => { pyHeld.current = false; startPyHold(togglePy); }}
+                  onPointerUp={stopPyHold}
+                  onPointerLeave={stopPyHold}
+                  onPointerCancel={stopPyHold}
+                  onContextMenu={e => e.preventDefault()}
+                  title={pyEmpty ? "No PY checks for current model"
                                 : pyAllOk ? "All poka-yoke checks passing — tap for shift history"
                                           : `${pyFailedCount} check${pyFailedCount!==1?'s':''} failed — tap for detail`}
                   style={{
@@ -4135,7 +4142,7 @@ export default function Management2() {
                     color: pyNoChecks ? textMut : pyOk ? STATUS_CLR["RUNNING"] : STATUS_CLR["BREAKDOWN"]}}>
                     {pyNoChecks ? "No Checks" : pyOk ? "All Set OK" : `${pyFailedCount} Failed`}
                   </div>
-                  {pyEmpty && pyHold > 0 && (
+                  {pyHold > 0 && (
                     <div style={{position:"absolute",left:0,bottom:0,height:4,width:`${pyHold * 100}%`,
                                  background:STATUS_CLR["SETUP"]}}/>
                   )}
