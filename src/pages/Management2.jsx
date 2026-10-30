@@ -4136,14 +4136,8 @@ export default function Management2() {
                     {pyNoChecks ? "No Checks" : pyOk ? "All Set OK" : `${pyFailedCount} Failed`}
                   </div>
                   {pyEmpty && pyHold > 0 && (
-                    <>
-                      <div style={{position:"absolute",top:6,right:8,fontSize:10,fontWeight:800,color:textSub,
-                                   fontFamily:"monospace"}}>
-                        Hold {Math.ceil((1 - pyHold) * PY_HOLD_MS / 1000)} s
-                      </div>
-                      <div style={{position:"absolute",left:0,bottom:0,height:4,width:`${pyHold * 100}%`,
-                                   background:STATUS_CLR["SETUP"]}}/>
-                    </>
+                    <div style={{position:"absolute",left:0,bottom:0,height:4,width:`${pyHold * 100}%`,
+                                 background:STATUS_CLR["SETUP"]}}/>
                   )}
                   <div style={{fontSize: isPortrait ? 8 : 11, fontWeight:700,color:textMut,letterSpacing:".05em",textTransform:"uppercase",
                     textAlign:"center", lineHeight:1.1}}>
