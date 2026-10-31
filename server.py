@@ -710,13 +710,16 @@ def live_line():
 
 
 class DemoRun:
-    """'Run demo' on the Collector panel: wipe the live data, then let the demo PLC play N cycles
-    (ideal CT ± a mix) through the normal collector -> camera -> dashboard path."""
+    """'Run demo' on the Collector panel: the demo PLC plays N cycles (ideal CT ± a mix, a chosen number
+    of them over target) through the normal collector -> camera -> dashboard path. The cycles are added
+    to the shift's live data, so real cycles after the demo continue the same graph; "fresh" deletes the
+    live data first. The real PLC is not read while the demo runs."""
 
     def __init__(self):
         self.lock = threading.Lock()
         self.plc = None
-        self.info = {"state": "idle", "total": 0, "done": 0, "ng": 0, "last_ct": None, "camera": None, "error": None}
+        self.info = {"state": "idle", "total": 0, "done": 0, "ng": 0, "over": 0, "last_ct": None, "camera": None,
+                     "error": None}
 
     def snapshot(self):
         with self.lock:
@@ -726,12 +729,13 @@ class DemoRun:
         with self.lock:
             self.info.update(kw)
 
-    def start(self, n):
+    def start(self, n, over=None, fresh=False):
         with self.lock:
             if self.info["state"] in ("starting", "running", "finishing"):
                 return False
-            self.info = {"state": "starting", "total": n, "done": 0, "ng": 0, "last_ct": None, "camera": None, "error": None}
-        threading.Thread(target=self._run, args=(n,), name="demo-run", daemon=True).start()
+            self.info = {"state": "starting", "total": n, "done": 0, "ng": 0, "over": 0, "last_ct": None, "camera": None,
+                         "error": None}
+        threading.Thread(target=self._run, args=(n, over, fresh), name="demo-run", daemon=True).start()
         return True
 
     def stop(self):
@@ -748,7 +752,7 @@ class DemoRun:
             time.sleep(0.2)
         return False
 
-    def _run(self, n):
+    def _run(self, n, over=None, fresh=False):
         ideal = _live_ideal()
         self.plc = DemoPlc()
         try:
@@ -759,8 +763,9 @@ class DemoRun:
                 cam_mode = None
             saved = machine_cfg()                  # the OK/NG/status/CT addresses saved on PLC Config
             COLLECTOR.set_override(collector_settings(saved, port))
-            COLLECTOR.reset_data()
-            CAMERA.reset_clips()
+            if fresh:
+                COLLECTOR.reset_data()
+                CAMERA.reset_clips()
             if cam_mode:
                 CAMERA.set_demo(cam_mode)
             self._set(camera=cam_mode or "none (ffmpeg not found)")
@@ -773,12 +778,13 @@ class DemoRun:
                     raise RuntimeError(CAMERA.snapshot().get("last_error") or "the camera recording did not start")
                 time.sleep(float(camera_cfg().get("pre_roll_s") or 0) + 3)
             self._set(state="running")
-            cts = demo_cycle_times(n, ideal)
+            cts = demo_cycle_times(n, ideal, over)
             ng = set(random.sample(range(2, n + 1), 2)) if n >= 5 else set()   # 2 NG to show the NG signal too
 
             def counted(i, ct, is_ng):
                 with self.lock:
-                    self.info.update(done=i, last_ct=ct, ng=self.info["ng"] + int(is_ng))
+                    self.info.update(done=i, last_ct=ct, ng=self.info["ng"] + int(is_ng),
+                                     over=self.info["over"] + int(ct > ideal + 0.009))
             finished = self.plc.play(cts, ideal, signal_map(saved), ng_cycles=ng, on_cycle=counted)
             self._set(state="finishing")
             if finished:
@@ -1218,9 +1224,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(DEMO.snapshot())
             try:
                 n = max(1, min(200, int(body.get("cycles") or 30)))
+                over = body.get("over_target")
+                over = None if over is None or over == "" else max(0, min(n, int(over)))
             except (TypeError, ValueError):
-                return self._json({"detail": "cycles must be a number"}, 400)
-            if not DEMO.start(n):
+                return self._json({"detail": "cycles and over target must be numbers"}, 400)
+            if not DEMO.start(n, over, bool(body.get("fresh"))):
                 return self._json({"detail": "A demo is already running"}, 409)
             return self._json(DEMO.snapshot())
         if p.startswith("/api/lines/") and len(parts) >= 7 and parts[4] == "cycles" and parts[6] == "comments":

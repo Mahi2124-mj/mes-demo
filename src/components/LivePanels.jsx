@@ -175,6 +175,8 @@ export function CollectorLive({ dark = false }) {
   const { data, error } = useCollector(1000);
   const [playSeq, setPlaySeq] = useState(null);
   const [demoN, setDemoN] = useState(30);
+  const [demoOver, setDemoOver] = useState(5);
+  const [demoFresh, setDemoFresh] = useState(false);
   const [demoMsg, setDemoMsg] = useState(null);
 
   const card = { background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: 16, minWidth: 0 };
@@ -192,12 +194,15 @@ export function CollectorLive({ dark = false }) {
   const demoBusy = ["starting", "running", "finishing"].includes(demo.state);
   const ideal = plc.ideal_cycle_time;
   const runDemo = async (stop) => {
-    if (!stop && !window.confirm(`Delete ALL live data (cycles, timeline, clips) and run ${demoN} demo cycles?\n`
+    const over = Math.min(demoOver, demoN);
+    if (!stop && !window.confirm(
+        (demoFresh ? `Delete ALL live data (cycles, timeline, clips) and run ${demoN} demo cycles (${over} over target)?\n`
+                   : `Run ${demoN} demo cycles (${over} over target)? They are added to this shift's graph; real cycles after the demo continue it.\n`)
         + `The real PLC is not read while the demo runs (about ${Math.round(demoN * (ideal || 10) / 60 + 1)} min).`)) return;
     setDemoMsg(null);
     try {
       const r = await fetch("/api/demo/run-demo", { method: "POST", headers: { "Content-Type": "application/json" },
-                                                    body: JSON.stringify(stop ? { stop: true } : { cycles: demoN }) });
+                                                    body: JSON.stringify(stop ? { stop: true } : { cycles: demoN, over_target: over, fresh: demoFresh }) });
       if (!r.ok) setDemoMsg((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
     } catch { setDemoMsg("Demo server not reachable"); }
   };
@@ -240,14 +245,28 @@ export function CollectorLive({ dark = false }) {
             <Chip label={DEMO_LABEL[demo.state] || demo.state}
                   color={demo.state === "error" ? "#dc2626" : demoBusy ? "#7c3aed" : demo.state === "done" ? "#16a34a" : "#94a3b8"} />
           )}
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             {!demoBusy && (
-              <label style={{ fontSize: 11, color: c.sub, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                Cycles
-                <input type="number" min={1} max={200} value={demoN}
-                  onChange={e => setDemoN(Math.max(1, Math.min(200, parseInt(e.target.value, 10) || 1)))}
-                  style={{ width: 60, padding: "4px 6px", borderRadius: 6, border: `1px solid ${c.border}`, background: c.deep, color: c.text, fontSize: 12 }} />
-              </label>
+              <>
+                <label style={{ fontSize: 11, color: c.sub, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  Cycles
+                  <input type="number" min={1} max={200} value={demoN}
+                    onChange={e => setDemoN(Math.max(1, Math.min(200, parseInt(e.target.value, 10) || 1)))}
+                    style={{ width: 60, padding: "4px 6px", borderRadius: 6, border: `1px solid ${c.border}`, background: c.deep, color: c.text, fontSize: 12 }} />
+                </label>
+                <label style={{ fontSize: 11, color: c.sub, display: "inline-flex", alignItems: "center", gap: 6 }}
+                       title={`Cycles slower than the ideal CT${ideal ? ` (${ideal} s)` : ""}`}>
+                  Over target
+                  <input type="number" min={0} max={demoN} value={Math.min(demoOver, demoN)}
+                    onChange={e => setDemoOver(Math.max(0, Math.min(demoN, parseInt(e.target.value, 10) || 0)))}
+                    style={{ width: 54, padding: "4px 6px", borderRadius: 6, border: `1px solid ${c.border}`, background: c.deep, color: c.text, fontSize: 12 }} />
+                </label>
+                <label style={{ fontSize: 11, color: c.sub, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}
+                       title="Off: the demo cycles are added to this shift's graph">
+                  <input type="checkbox" checked={demoFresh} onChange={e => setDemoFresh(e.target.checked)} />
+                  Delete old data first
+                </label>
+              </>
             )}
             {demoBusy ? (
               <button type="button" onClick={() => runDemo(true)}
@@ -270,6 +289,7 @@ export function CollectorLive({ dark = false }) {
             <div style={{ fontSize: 11, color: c.sub, marginTop: 4 }}>
               Cycle <b style={{ color: c.text }}>{demo.done || 0} / {demo.total}</b>
               {demo.last_ct != null && <> · last CT <b style={{ color: c.text }}>{demo.last_ct} s</b></>}
+              {demo.over > 0 && <> · over target <b style={{ color: "#d97706" }}>{demo.over}</b></>}
               {demo.ng > 0 && <> · NG <b style={{ color: "#dc2626" }}>{demo.ng}</b></>}
               {demo.camera && <> · video: {demo.camera === "synthetic" ? "demo test picture (camera not streaming)" : demo.camera === "camera" ? "real camera" : demo.camera}</>}
             </div>

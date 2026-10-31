@@ -95,11 +95,15 @@ The server PC must be on the machine network (192.168.30.x).
   in **Collector Data** (Machine Config tab ④, and the 📡 COLLECTOR button on MANAGEMENT-2).
 
 **Demo PLC run — `demo_plc.py`** (Collector Data → ▶ Run demo)
-- Deletes all live data (cycles, timeline, clips), then a built-in demo PLC plays N cycles (default 30)
-  over the same SLMP path: CT written to D103, OK pulse on L108. Cycle times are mixed around the ideal
-  (e.g. 9, 10, 14 s for 10 s), so speed loss goes + and −. Halfway it makes one 15 s andon call on the
-  first andon register (Maintenance), so a loss shows on the timeline. Takes about N × ideal + 15 seconds.
-- The real PLC is not read during the demo; the collector switches back to it afterwards.
+- A built-in demo PLC plays N cycles (default 30) over the same SLMP path: CT written to D103, OK pulse on
+  L108. "Over target" sets how many of them are slower than the ideal CT (default 5); the rest are on
+  target or faster, so speed loss goes + and −. Halfway it makes one 15 s andon call on the first andon
+  register (Maintenance), so a loss shows on the timeline. Takes about N × ideal + 15 seconds.
+- The demo cycles are added to this shift's graph (cycle numbers go on); real cycles after the demo
+  continue the same graph. Tick "Delete old data first" to start from an empty graph (deletes the live
+  cycles, timeline and clips).
+- The real PLC is not read during the demo (its signals then are not counted); the collector switches
+  back to it afterwards, and the first real cycle is timed from that moment.
 - Video: the real camera if it is streaming, otherwise a generated test picture (needs ffmpeg).
 
 **Camera — `camera.py`** (settings: Camera page)

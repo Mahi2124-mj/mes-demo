@@ -241,8 +241,11 @@ class Collector:
         self.cfg_version += 1
 
     def set_override(self, cfg):
-        """Read another PLC (e.g. the demo PLC) without touching the saved Machine Config; None = back."""
+        """Read another PLC (e.g. the demo PLC) without touching the saved Machine Config; None = back.
+        The next cycle is timed like a shift's first one: the other PLC's last signal says nothing about it."""
         self.override = cfg
+        with self.slock:
+            self.last_cycle_at = self.last_cycle_key = None
         self.reload()
 
     def reset_data(self):

@@ -49,9 +49,20 @@ def signal_map(saved):
             "ct_scale": float(saved.get("ct_register_scale") or 0.1)}
 
 
-def demo_cycle_times(n, ideal):
+def demo_cycle_times(n, ideal, over=None):
     """n cycle times around `ideal`: faster, on target and slower ones mixed (rounded to 0.1 s),
-    always including ideal x0.9, x1.0 and x1.4 (e.g. 9, 10 and 14 s for a 10 s ideal)."""
+    always including ideal x0.9, x1.0 and x1.4 (e.g. 9, 10 and 14 s for a 10 s ideal).
+    With `over`: exactly that many are over the target (ideal x1.08-1.45), the rest at most the ideal."""
+    if over is not None:
+        over = max(0, min(n, int(over)))
+        slow = set(random.sample(range(n), over))
+        out = [round(ideal * random.uniform(1.08, 1.45), 1) if i in slow
+               else min(ideal, round(ideal * random.uniform(0.85, 1.0), 1)) for i in range(n)]
+        for i, f in zip(random.sample(sorted(slow), min(over, 1)), (1.4,)):
+            out[i] = round(ideal * f, 1)
+        for i, f in zip(random.sample(sorted(set(range(n)) - slow), min(n - over, 2)), (0.9, 1.0)):
+            out[i] = round(ideal * f, 1)
+        return out
     out = []
     for _ in range(n):
         r = random.random()
