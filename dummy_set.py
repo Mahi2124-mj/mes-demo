@@ -41,6 +41,8 @@ NG_ROLL_S = 4.0                                       # an NG clip holds 2 s bef
 OK_MAX_S = 15.0                                       # OK cycle times stay under this
 TAIL = (("ok", 17), ("ng", 1), ("ok", 12))   # the last 30 cycles: only 1 NG
 LIVE_PATTERN = (("ok", 17), ("ng", 1), ("ok", 12))   # live dummy line: 1 NG in every 30 cycles
+PAUSE_CHANCE = (0.0, 0.05)                            # live line: per hour, the chance of a short stop before a cycle
+PAUSE_S = (15, 45)                                    # ... and its length
 TAIL_N = sum(n for _, n in TAIL)
 
 
@@ -113,10 +115,19 @@ def plan_live(ok, ng, t, until, breaks, seed):
         while True:
             for kind, n in LIVE_PATTERN:
                 yield from [kind] * n
-    return _plan(ok, ng, t, until, breaks, random.Random(seed), 0, forever())
+    # Short stops between cycles, more in some hours than in others, so the hourly counts differ like a real line.
+    hours = {}
+
+    def pause(at):
+        key = (at.date(), at.hour)
+        if key not in hours:
+            hours[key] = random.Random(f"{seed}-{key}").uniform(*PAUSE_CHANCE)
+        return pause_rng.uniform(*PAUSE_S) if pause_rng.random() < hours[key] else 0.0
+    pause_rng = random.Random(seed + "-pause")
+    return _plan(ok, ng, t, until, breaks, random.Random(seed), 0, forever(), pause)
 
 
-def _plan(ok, ng, t, until, breaks, rng, tail_from, kind_iter=None):
+def _plan(ok, ng, t, until, breaks, rng, tail_from, kind_iter=None, pause=None):
     rows, deck, last, ng_i = [], [], None, 0
     for kind in kind_iter or kinds(tail_from):
         if kind == "ok":
@@ -130,6 +141,8 @@ def _plan(ok, ng, t, until, breaks, rng, tail_from, kind_iter=None):
         ct = round(clip["duration"] - (NG_ROLL_S if kind == "ng" else 0) + rng.uniform(*JITTER_S), 2)
         if kind == "ok" and ct >= OK_MAX_S:      # a long OK clip still reads as a good cycle (only NG show red)
             ct = round(rng.uniform(OK_MAX_S - 1.2, OK_MAX_S - 0.1), 2)
+        if pause:
+            t += dt.timedelta(seconds=pause(t))
         end = t + dt.timedelta(seconds=ct)
         for b0, b1 in breaks:
             if t < b1 and b0 < end:
