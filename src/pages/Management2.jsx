@@ -206,7 +206,14 @@ function getStatusColor(st) {
   return STATUS_CLR[up] || "#94a3b8";
 }
 
-// ─── CT distribution histogram (last 30-day density, 0.1 s buckets) ──
+// Peak bucket of the CT distribution: "12.6s", or "12-13s" when the buckets are wider than 0.1 s.
+function histPeakLabel(data) {
+  const p = data?.peak_bucket, w = data?.bucket_s || 0.1;
+  if (p == null) return "";
+  return w > 0.1 ? `${+p.toFixed(1)}-${+(p + w).toFixed(1)}s` : `${p.toFixed(1)}s`;
+}
+
+// ─── CT distribution histogram (last 30-day density, 0.1 s buckets; wider while there are few cycles) ──
 // Rendered into the chart card when `chartMode === "histogram"`.  Bars
 // are coloured green/amber/red by their CT value vs ideal, and the
 // global peak bucket is highlighted in yellow.  Total cycle count +
@@ -229,7 +236,8 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
                  : Math.ceil(Math.max(40, idCt * 2, Math.min(Math.max(...cts), idCt * 6)) / 5) * 5;
     canvasRef.current.setAttribute("data-hist-axis", MAX_CT);
     const span   = MAX_CT - Math.min(...cts);
-    const stepK  = span <= 60 ? 1 : span <= 150 ? 5 : 10;          // bucket width in 0.1 s
+    const stepK  = Math.max(span <= 60 ? 1 : span <= 150 ? 5 : 10,  // bucket width in 0.1 s: wider on a wide
+                            Math.round((data.bucket_s || 0.1) * 10)); // axis, and as wide as the server's buckets
     const tickS  = span <= 50 ? 5 : span <= 120 ? 10 : 20;          // a label every tickS seconds
     const keyOf  = ct => Math.floor(Math.round(ct * 10) / stepK) * stepK;
     const byCt = new Map();
@@ -277,7 +285,9 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
             titleFont: { weight: 800, size: 12 },
             bodyFont: { size: 11, family: "monospace" },
             callbacks: {
-              title: i => `CT ${labels[i[0].dataIndex]}s`,
+              title: i => stepK > 1
+                ? `CT ${labels[i[0].dataIndex]}-${(buckets[i[0].dataIndex].ct + stepK / 10).toFixed(1)}s`
+                : `CT ${labels[i[0].dataIndex]}s`,
               label: t => `${t.parsed.y.toLocaleString()} cycles`,
             },
           },
@@ -411,7 +421,7 @@ function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, tex
       }}>
         {data.total_cycles?.toLocaleString()} cycles · peak{" "}
         <span style={{ color: D ? "#fbbf24" : "#b45309", fontWeight: 900 }}>
-          {data.peak_bucket?.toFixed(1)}s
+          {histPeakLabel(data)}
         </span>{" "}
         ({data.peak_count?.toLocaleString()})
       </div>
@@ -3761,7 +3771,7 @@ export default function Management2() {
                     {ctHistogram?.total_cycles?.toLocaleString() || "—"} cycles
                     {ctHistogram?.peak_bucket != null && (
                       <> · peak <span style={{color:"#fbbf24"}}>
-                        {ctHistogram.peak_bucket.toFixed(1)}s</span></>
+                        {histPeakLabel(ctHistogram)}</span></>
                     )}
                   </span>
                 </div>

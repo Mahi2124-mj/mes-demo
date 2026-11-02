@@ -627,22 +627,23 @@ def live_bypass_episodes(q):
 
 
 def live_ct_histogram(q):
-    """CT distribution of the live cycles of the last N days (default 30), 0.1 s buckets."""
+    """CT distribution of the live cycles of the last N days (default 30). Buckets of 0.1 s, wider while
+    there are few cycles (1 s under 100, 0.5 s under 500) so a short history reads as a curve, not spikes."""
     try:
         days = max(1, int((q.get("days") or ["30"])[0]))
     except ValueError:
         days = 30
     since = (dt.date.today() - dt.timedelta(days=days - 1)).isoformat()
+    cts = [float(c["ct"]) for d, sh, _ in STORE.shift_files() if d >= since for c in STORE.cycles(d, sh)]
+    step = 10 if len(cts) < 100 else 5 if len(cts) < 500 else 1          # bucket width in 0.1 s
     buckets = {}
-    for d, sh, _ in STORE.shift_files():
-        if d >= since:
-            for c in STORE.cycles(d, sh):
-                b = round(float(c["ct"]), 1)
-                buckets[b] = buckets.get(b, 0) + 1
+    for ct in cts:
+        b = (round(ct * 10) // step) * step / 10                            # bucket start
+        buckets[b] = buckets.get(b, 0) + 1
     rows = [{"ct": k, "count": v} for k, v in sorted(buckets.items())]
     peak = max(rows, key=lambda r: r["count"]) if rows else {"ct": None, "count": 0}
-    return {"total_cycles": sum(buckets.values()), "peak_bucket": peak["ct"], "peak_count": peak["count"],
-            "buckets": rows, "window_days": days}
+    return {"total_cycles": len(cts), "peak_bucket": peak["ct"], "peak_count": peak["count"],
+            "bucket_s": step / 10, "buckets": rows, "window_days": days}
 
 
 def live_ct_history(q):

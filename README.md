@@ -91,7 +91,8 @@ The server PC must be on the machine network (192.168.30.x).
 - Shifts and hourly slots come from `data/mgmt/line.json`. Cycles made in a gap after a shift (OT) count
   for that shift. Plan = working time so far ÷ the machine's ideal CT (Machine Config). Time without PLC
   data (`PLC OFFLINE`) counts neither for plan nor against availability.
-- CT distribution = the live cycles of the last 30 days (0.1 s buckets); its axis follows the data.
+- CT distribution = the live cycles of the last 30 days (0.1 s buckets; 1 s under 100 cycles and 0.5 s under
+  500, so a short history shows a curve instead of single-cycle spikes); its axis follows the data.
 - Cycle signals, counters and the digital inputs from "Monitor Config" are read every second and shown
   in **Collector Data** (Machine Config tab ④, and the 📡 COLLECTOR button on MANAGEMENT-2).
 
