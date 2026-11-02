@@ -1,9 +1,13 @@
 @echo off
 rem Start the MES demo clone on Windows (port 5000, or the port given as the first argument).
-rem Does everything itself: installs the npm packages (first run), builds the frontend,
+rem Does everything itself: installs the npm packages (first run), builds the frontend (only after a change),
 rem downloads ffmpeg into .\ffmpeg (first run, about 100 MB), opens the port in Windows Firewall
 rem (first run, as Administrator), then runs the server.
 cd /d "%~dp0"
+
+set "PY=python"
+where python >nul 2>nul
+if not %errorlevel%==0 set "PY=py"
 
 if not exist node_modules (
   echo Installing npm packages...
@@ -11,9 +15,15 @@ if not exist node_modules (
   if errorlevel 1 exit /b 1
 )
 
-echo Building the frontend...
-call npx vite build
-if errorlevel 1 exit /b 1
+rem Build the frontend only when dist\ is missing or older than a frontend file (src\, public\, index.html, ...).
+%PY% -c "import os,sys;t=os.path.getmtime('dist/index.html') if os.path.exists('dist/index.html') else 0;f=[os.path.join(r,n) for p in ('src','public') for r,_,ns in os.walk(p) for n in ns]+['index.html','package.json','vite.config.js'];sys.exit(any(os.path.getmtime(x)>t for x in f if os.path.exists(x)))"
+if errorlevel 1 (
+  echo Building the frontend...
+  call npx vite build
+  if errorlevel 1 exit /b 1
+) else (
+  echo Frontend is up to date, no build needed.
+)
 
 if exist ffmpeg\bin\ffmpeg.exe goto ffmpeg_ok
 where ffmpeg >nul 2>nul
@@ -37,9 +47,4 @@ if errorlevel 1 (
   )
 )
 
-where python >nul 2>nul
-if %errorlevel%==0 (
-  python server.py %*
-) else (
-  py server.py %*
-)
+%PY% server.py %*

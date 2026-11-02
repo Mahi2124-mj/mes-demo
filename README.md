@@ -40,14 +40,15 @@ Linux:
 
 Windows (PowerShell, in the repo folder):
 
-    .\start.bat      # first run: npm install + ffmpeg download into .\ffmpeg; then build + python server.py
-                      # stop with Ctrl+C
+    .\start.bat      # first run: npm install + ffmpeg download into .\ffmpeg; then python server.py
+                      # builds the frontend only when src\, public\ etc. changed since the last build
+                      # stop with Ctrl+C, or from another window: .\stop.bat
 
 Other PCs on the LAN open `http://<this PC's IP>:5000/...` (the server prints the links at start).
 No CORS setting is involved: pages and API come from the same server. Windows Firewall must allow
 TCP 5000 — `start.bat` adds that rule once when run as Administrator.
 
-Rebuild after a frontend change: `npx vite build`, then reload the page.
+After a frontend change `start.bat` rebuilds by itself (or run `npx vite build`), then reload the page.
 Needs Python 3.8+ (standard library only) and, for live cycle clips, **ffmpeg**
 (Windows: unzip a build into the repo so that `ffmpeg\bin\ffmpeg.exe` exists — no PATH needed:
 
@@ -136,6 +137,18 @@ The server PC must be on the machine network (192.168.30.x).
   the start from the recording on disk.
 - Without ffmpeg: the preview falls back to the camera's HTTP snapshot (`/ISAPI/.../picture` or `/cgi-bin/camera`), no clips.
 - Live preview: Camera page → Preview → Live, or the 📷 CAMERA button on MANAGEMENT-2.
+
+**Demo set — `demo_set.bat` / `demo_set.py`** (50 hand-picked live cycles with clips)
+- `clips/demo_set/` holds 50 recorded clips (`set_01.mp4` .. `set_50.mp4`) and `manifest.json`, in play order:
+  10 OK, 1 NG, 10 OK, 1 NG, ... (46 OK of 11.5-14.4 s, average 12.9 s; 4 NG of 18-23 s). Every clip is the
+  camera's own 1280x720 H.264 at a steady 25 fps, checked to decode and play to the end. Not in git (`clips/`).
+- `demo_set.bat` stops the server, moves all live cycle/status files to `data\live\backup_<time>\` (nothing is
+  deleted), writes the 50 cycles back to back ending just before now in the current shift (no cycle inside a
+  break), copies the clips to `clips/live/cycle_<seq>.mp4` under new cycle numbers, sets the target (Ideal CT)
+  to the manifest's `target_ct` (15 s), then starts the server.
+- The page shows only the current shift, so run it again on the demo day / after a shift change. It refuses
+  in the first ~12 minutes of a shift (the 50 cycles must fit before now). ▶ Run demo adds its cycles after the
+  set; with "Delete old data first" it deletes every live clip (the set itself in `clips/demo_set/` stays).
 
 ## Layout (MANAGEMENT-2)
 ⚙ LAYOUT in the header opens a panel; every change shows at once and is saved on the server
