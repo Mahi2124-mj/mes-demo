@@ -7,8 +7,8 @@ logs/
 __pycache__/
 *.pyc
 
-# Plant camera footage (144 MB) — kept on the server only
-clips/
+# Plant camera footage is in git (clips/); only the camera's in-progress recording segments are not
+clips/live/seg/
 
 # Local ffmpeg build (Windows: ffmpeg\bin\ffmpeg.exe, found by camera.py)
 ffmpeg/
@@ -23,5 +23,3 @@ data/live/
 # MANAGEMENT-2 layout set with ⚙ LAYOUT (box sizes, CT axis range)
 data/dashboard_layout.json
 
-# Dummy shift for MANAGEMENT-2 (dummy_set.py)
-data/dummy/

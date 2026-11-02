@@ -1,0 +1,151 @@
+{
+ "ok": [
+  {
+   "file": "ok_01.mp4",
+   "duration": 14.0,
+   "source": "cycle-video (1).mp4"
+  },
+  {
+   "file": "ok_02.mp4",
+   "duration": 14.0,
+   "source": "cycle-video (10).mp4"
+  },
+  {
+   "file": "ok_03.mp4",
+   "duration": 13.53,
+   "source": "cycle-video (11).mp4"
+  },
+  {
+   "file": "ok_04.mp4",
+   "duration": 12.0,
+   "source": "cycle-video (12).mp4"
+  },
+  {
+   "file": "ok_05.mp4",
+   "duration": 10.0,
+   "source": "cycle-video (13).mp4"
+  },
+  {
+   "file": "ok_06.mp4",
+   "duration": 12.8,
+   "source": "cycle-video (14).mp4"
+  },
+  {
+   "file": "ok_07.mp4",
+   "duration": 12.73,
+   "source": "cycle-video (15).mp4"
+  },
+  {
+   "file": "ok_08.mp4",
+   "duration": 15.0,
+   "source": "cycle-video (16).mp4"
+  },
+  {
+   "file": "ok_09.mp4",
+   "duration": 11.0,
+   "source": "cycle-video (17).mp4"
+  },
+  {
+   "file": "ok_10.mp4",
+   "duration": 12.8,
+   "source": "cycle-video (18).mp4"
+  },
+  {
+   "file": "ok_11.mp4",
+   "duration": 15.33,
+   "source": "cycle-video (19).mp4"
+  },
+  {
+   "file": "ok_12.mp4",
+   "duration": 13.0,
+   "source": "cycle-video (2).mp4"
+  },
+  {
+   "file": "ok_13.mp4",
+   "duration": 14.0,
+   "source": "cycle-video (20).mp4"
+  },
+  {
+   "file": "ok_14.mp4",
+   "duration": 15.47,
+   "source": "cycle-video (21).mp4"
+  },
+  {
+   "file": "ok_15.mp4",
+   "duration": 11.0,
+   "source": "cycle-video (22).mp4"
+  },
+  {
+   "file": "ok_16.mp4",
+   "duration": 14.93,
+   "source": "cycle-video (23).mp4"
+  },
+  {
+   "file": "ok_17.mp4",
+   "duration": 12.27,
+   "source": "cycle-video (24).mp4"
+  },
+  {
+   "file": "ok_18.mp4",
+   "duration": 14.0,
+   "source": "cycle-video (25).mp4"
+  },
+  {
+   "file": "ok_19.mp4",
+   "duration": 13.0,
+   "source": "cycle-video (26).mp4"
+  },
+  {
+   "file": "ok_20.mp4",
+   "duration": 13.8,
+   "source": "cycle-video (27).mp4"
+  },
+  {
+   "file": "ok_21.mp4",
+   "duration": 15.6,
+   "source": "cycle-video (3).mp4"
+  },
+  {
+   "file": "ok_22.mp4",
+   "duration": 15.33,
+   "source": "cycle-video (4).mp4"
+  },
+  {
+   "file": "ok_23.mp4",
+   "duration": 11.0,
+   "source": "cycle-video (5).mp4"
+  },
+  {
+   "file": "ok_24.mp4",
+   "duration": 14.0,
+   "source": "cycle-video (6).mp4"
+  },
+  {
+   "file": "ok_25.mp4",
+   "duration": 15.0,
+   "source": "cycle-video (7).mp4"
+  },
+  {
+   "file": "ok_26.mp4",
+   "duration": 15.0,
+   "source": "cycle-video (8).mp4"
+  },
+  {
+   "file": "ok_27.mp4",
+   "duration": 14.0,
+   "source": "cycle-video (9).mp4"
+  },
+  {
+   "file": "ok_28.mp4",
+   "duration": 13.0,
+   "source": "cycle-video.mp4"
+  }
+ ],
+ "ng": [
+  {
+   "file": "ng_01.mp4",
+   "duration": 30.0,
+   "source": "ng andon 30s.mp4"
+  }
+ ]
+}
