@@ -2,7 +2,7 @@
  "id": 12,
  "plant_id": 1,
  "line_code": "YCA-L5",
- "line_name": "YCA-SS",
+ "line_name": "YSD-SS",
  "description": null,
  "is_active": true,
  "db_table_name": "yca_l5_dashboard",

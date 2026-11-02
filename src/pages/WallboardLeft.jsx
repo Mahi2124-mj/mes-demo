@@ -1322,6 +1322,9 @@ export default function WallboardLeft() {
     }
     setVideoCycle(null);
   }, []);
+  // Dummy mode (wallboard-cycles .dummy): the server holds its clock at a set moment; show that moment.
+  const pinnedNowRef = useRef(null);
+  const clockNow = () => (pinnedNowRef.current ? new Date(pinnedNowRef.current) : new Date());
   const [now, setNow]   = useState(new Date());
 
   const _detectOrient = () =>
@@ -1358,7 +1361,7 @@ export default function WallboardLeft() {
     // lineId is null until a NAMED url resolves — don't fire /api/lines/null/…
     if (!lineId) return;
     axios.get(`/api/lines/${lineId}/wallboard-cycles`)
-         .then(r => setData(r.data))
+         .then(r => { pinnedNowRef.current = r.data?.dummy ? r.data.server_now : null; setNow(clockNow()); setData(r.data); })
          .catch(() => {});
   }, [lineId]);
   const fetchSummary = useCallback(() => {
@@ -1378,7 +1381,7 @@ export default function WallboardLeft() {
     fetchCycles(); fetchSummary();
     const c = setInterval(fetchCycles, 8000);
     const s = setInterval(fetchSummary, 30000);
-    const t = setInterval(() => setNow(new Date()), 1000);
+    const t = setInterval(() => setNow(clockNow()), 1000);
     return () => { clearInterval(c); clearInterval(s); clearInterval(t); };
   }, [fetchCycles, fetchSummary, lineId]);
 

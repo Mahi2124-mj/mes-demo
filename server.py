@@ -20,6 +20,7 @@ Data:
 Run:  python3 server.py [port]        (default 5000)
 """
 import atexit
+import bisect
 import datetime as dt
 import json
 import os
@@ -33,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from camera import Camera, MAX_CLIP_S
-from collector import ANDON, OFFLINE, Collector, LiveStore, ShiftClock
+from collector import ANDON, OFFLINE, Collector, LiveStore, ShiftClock, min_frac
 from demo_plc import DemoPlc, collector_settings, demo_cycle_times, signal_map
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
@@ -103,6 +104,14 @@ def _load(name, default):
         return default
 
 
+def _load_path(path, default):
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
 def _save(name, obj):
     path = os.path.join(DATA, name)
     tmp = path + ".tmp"
@@ -122,7 +131,8 @@ def _cycle_rows(m):
         ts = c["ts"]
         if m["sub_id"] != 0 and not ts.endswith(IST):
             ts += IST                          # MES sends sub-machine ts with an offset, main ts naive
-        row = {"cycle_seq": c["cycle_seq"], "ts": ts, "ct": c["ct"], "is_ng": c["is_ng"], "shift_name": SHIFT}
+        row = {"cycle_seq": c["cycle_seq"], "ts": ts, "ct": c["ct"], "is_ng": c["is_ng"],
+               "shift_name": m.get("_shift", SHIFT)}
         if m["sub_id"] != 0 and c.get("part_code"):
             row["part_code"] = c["part_code"]
         rows.append(row)
@@ -139,7 +149,23 @@ def _machine_payload(m):
     return out
 
 
+def _dummy_main():
+    """In dummy mode the SUPERVISOR page shows the dummy shift as its main machine (same cycles and clips
+    as MANAGEMENT-2); None otherwise."""
+    if not _dummy_cfg():
+        return None
+    rd, sh, _ = CLOCK.at(_now())
+    main = BY_SUB.get(0) or {}
+    return {**main, "sub_id": 0, "machine_name": main.get("machine_name", "Final Inspection"),
+            "machine_seq": main.get("machine_seq", 0), "ideal_ct": _live_ideal(),
+            "cycles": _store().cycles(rd, sh), "_date": rd, "_shift": sh}
+
+
 def wallboard_cycles():
+    dm = _dummy_main()
+    if dm:
+        return {"shift_name": dm["_shift"], "record_date": dm["_date"], "main": _machine_payload(dm), "machines": [],
+                "dummy": _dummy_now() is not None, "server_now": _now().isoformat(timespec="seconds")}
     main = BY_SUB.get(0)
     return {"shift_name": SHIFT, "record_date": RECORD_DATE,
             "main": _machine_payload(main) if main else None,
@@ -236,7 +262,7 @@ def hourly_loss_breakdown():
 
 
 def wallboard_summary():
-    rt = realtime()
+    rt = live_realtime({}) if _dummy_cfg() else realtime()
     kpi = {k: rt.get(k) for k in ("line_name", "shift_name", "record_date", "operating_status", "shift_plan",
                                   "shift_plan_completed", "ok_count", "ng_count", "current_model_name",
                                   "current_model_number", "overall_oee", "availability", "performance",
@@ -247,9 +273,10 @@ def wallboard_summary():
 
 def _machine_for(q):
     try:
-        return BY_SUB.get(int((q.get("sub_id") or ["0"])[0]))
+        sub = int((q.get("sub_id") or ["0"])[0])
     except ValueError:
         return None
+    return (_dummy_main() if sub == 0 else None) or BY_SUB.get(sub)
 
 
 def over_target_history(q):
@@ -258,7 +285,8 @@ def over_target_history(q):
         return {"ideal_ct": None, "rows": []}
     ideal, total = m["ideal_ct"], len(m["cycles"])
     over = sum(1 for c in m["cycles"] if c["ct"] > ideal + 0.009)
-    return {"ideal_ct": ideal, "rows": [{"date": RECORD_DATE, "shift": SHIFT, "over": over, "total": total,
+    return {"ideal_ct": ideal, "rows": [{"date": m.get("_date", RECORD_DATE), "shift": m.get("_shift", SHIFT),
+                                         "over": over, "total": total,
                                          "pct": round(100.0 * over / total, 1) if total else 0.0}]}
 
 
@@ -274,7 +302,7 @@ def hourly_avg_ct(q):
               "over": sum(1 for x in v if x > ideal + 0.009), "working_seconds": round(sum(v), 1)}
              for h, v in sorted(by_hour.items())]
     all_ct = [c["ct"] for c in m["cycles"]]
-    return {"date": RECORD_DATE, "shift": SHIFT, "ideal_ct": ideal, "slots": slots,
+    return {"date": m.get("_date", RECORD_DATE), "shift": m.get("_shift", SHIFT), "ideal_ct": ideal, "slots": slots,
             "avg_ct": round(sum(all_ct) / len(all_ct), 2), "total_cycles": len(all_ct),
             "working_seconds": round(sum(all_ct), 1)}
 
@@ -358,6 +386,106 @@ CLOCK = ShiftClock(_line_cfg)
 CAMERA = Camera(camera_cfg, CLIPS, HERE)
 COLLECTOR = Collector(STORE, CLOCK, machine_cfg, _line_cfg, on_cycle=CAMERA.on_cycle)
 
+# Dummy mode: data/dummy/dummy.json {"enabled": true, "live": true} runs a dummy line on the real clock: every
+# shift is filled with the clips in clips/dummy_set/ (dummy_set.py) back to back, and MANAGEMENT-2 / SUPERVISOR
+# show the cycles that have ended by now, so the counts, hourly plan and OEE move like a live line.
+# {"enabled": true, "now": "2026-11-03T10:00:00"} instead shows the shift prepared in data/dummy/ with the clock
+# held at "now". The collector keeps recording the real PLC into data/live/ meanwhile.
+# dummy_on.bat / dummy_off.bat switch it (no restart needed).
+DUMMY_STORE = LiveStore(os.path.join(DATA, "dummy"))
+
+
+def _dummy_cfg():
+    cfg = _load("dummy/dummy.json", {})
+    return cfg if cfg.get("enabled") else None
+
+
+def _dummy_now():
+    """The held clock of the prepared dummy shift; None on the real clock (live dummy line or no dummy)."""
+    cfg = _dummy_cfg()
+    try:
+        return dt.datetime.fromisoformat(cfg["now"]) if cfg and not cfg.get("live") and cfg.get("now") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _now():
+    return _dummy_now() or dt.datetime.now()
+
+
+class DummyLive:
+    """LiveStore look-alike for the live dummy line: each production shift is planned once from the dummy clip
+    set (same seed for the same shift, so every screen and every restart sees the same cycles), and only the
+    cycles that have ended by now are returned. Status: RUNNING from the shift start, BREAK in breaks."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.plans = {}                       # (rd, sh) -> (ends, rows, shift start, breaks)
+        self.clips = {}                       # (rd, sh, cycle_seq) -> clip path
+
+    def _plan(self, rd, sh):
+        with self.lock:
+            hit = self.plans.get((rd, sh))
+            if hit:
+                return hit
+            import dummy_set                  # its planner: same pattern, jitter and CT rules as dummy_set.py
+            from demo_set import breaks_of
+            row = CLOCK.shift_row(sh)
+            man = _load_path(os.path.join(CLIPS, "dummy_set", "manifest.json"), {})
+            plan = ([], [], None, [])
+            if row and not str(sh).startswith("GAP") and man.get("ok") and man.get("ng"):
+                s0, s1 = CLOCK.bounds(dt.date.fromisoformat(rd), row)
+                breaks = breaks_of(_line_cfg(), CLOCK, rd, sh)
+                planned = dummy_set.plan_live(man["ok"], man["ng"], s0, s1, breaks, rd + sh)
+                rows = []
+                for seq, (clip, ct, is_ng, end) in enumerate(planned, 1):      # cycle numbers 1.. in every shift
+                    self.clips[(rd, sh, seq)] = os.path.join(CLIPS, "dummy_set", clip["file"])
+                    rows.append({"cycle_seq": seq, "ts": end.isoformat(timespec="microseconds"), "ct": ct,
+                                 "is_ng": is_ng, "part_code": f"{end:%Y%m%d}-{seq:06d}", "gap": ct,
+                                 "excluded": 0.0, "ct_source": "measured"})
+                plan = ([dt.datetime.fromisoformat(r["ts"]) for r in rows], rows, s0, breaks)
+            self.plans[(rd, sh)] = plan
+            if len(self.plans) > 6:           # keep the last few shifts
+                self.plans.pop(next(iter(self.plans)))
+            return plan
+
+    def cycles(self, rd, sh):
+        ends, rows, _, _ = self._plan(rd, sh)
+        return rows[:bisect.bisect_right(ends, dt.datetime.now())]
+
+    def status_log(self, rd, sh):
+        _, _, s0, breaks = self._plan(rd, sh)
+        now = dt.datetime.now()
+        if s0 is None or now < s0:
+            return []
+        ev = [(s0, "RUNNING", 1)]
+        for b0, b1 in breaks:
+            if b0 <= now:
+                ev.append((b0, "BREAK", 8))
+            if b1 <= now:
+                ev.append((b1, "RUNNING", 1))
+        return [{"ts": int(t.timestamp() * 1000), "nowMinFrac": min_frac(t), "status": st, "code": code, "shift": sh}
+                for t, st, code in sorted(ev)]
+
+    def shift_files(self):
+        rd, sh, _ = CLOCK.at(dt.datetime.now())
+        return [(rd, sh, None)] if self._plan(rd, sh)[1] else []
+
+    def clip_path(self, seq, rd=None, sh=None):
+        if not (rd and sh):
+            rd, sh, _ = CLOCK.at(dt.datetime.now())
+        self._plan(rd, sh)
+        p = self.clips.get((rd, sh, seq))
+        return p if p and os.path.isfile(p) else None
+
+
+DUMMY_LIVE = DummyLive()
+
+
+def _store():
+    cfg = _dummy_cfg()
+    return STORE if not cfg else DUMMY_LIVE if cfg.get("live") else DUMMY_STORE
+
 
 def _live_ideal():
     return float(machine_cfg().get("ideal_cycle_time") or 20.0)
@@ -372,7 +500,7 @@ def _live_pick(q):
             return d, sh
         except ValueError:
             pass
-    rd, sh, _ = CLOCK.at(dt.datetime.now())
+    rd, sh, _ = CLOCK.at(_now())
     return rd, sh
 
 
@@ -384,7 +512,7 @@ def _live_loss_types():
 
 def _live_segments(rd, sh, t_from, t_to):
     """[(start, end, status)] from the shift's status log, clipped to [t_from, t_to]."""
-    log = sorted(STORE.status_log(rd, sh), key=lambda e: e["ts"])
+    log = sorted(_store().status_log(rd, sh), key=lambda e: e["ts"])
     segs = []
     for i, e in enumerate(log):
         s = dt.datetime.fromtimestamp(e["ts"] / 1000)
@@ -400,9 +528,9 @@ def _live_window(rd, sh):
     (first cycle or first PLC contact — time before the collector ran is not counted)."""
     row = CLOCK.shift_row(sh) or CLOCK.production_shifts()[0]
     t0, t1 = CLOCK.bounds(dt.date.fromisoformat(rd), row)
-    now = min(dt.datetime.now(), t1)
-    starts = [dt.datetime.fromtimestamp(e["ts"] / 1000) for e in STORE.status_log(rd, sh) if e.get("status") != OFFLINE]
-    cyc = STORE.cycles(rd, sh)
+    now = min(_now(), t1)
+    starts = [dt.datetime.fromtimestamp(e["ts"] / 1000) for e in _store().status_log(rd, sh) if e.get("status") != OFFLINE]
+    cyc = _store().cycles(rd, sh)
     if cyc:
         starts.append(dt.datetime.fromisoformat(cyc[0]["ts"]) - dt.timedelta(seconds=cyc[0]["ct"]))
     w0 = max(t0, min(starts)) if starts else None
@@ -427,7 +555,7 @@ def live_realtime(q):
     ideal = _live_ideal()
     cfg = machine_cfg()
     row, t0, t1, now, w0 = _live_window(rd, sh)
-    cyc = STORE.cycles(rd, sh)
+    cyc = _store().cycles(rd, sh)
     ok = sum(1 for c in cyc if not c["is_ng"])
     ng = len(cyc) - ok
     run_s = sum(c["ct"] for c in cyc)
@@ -451,28 +579,31 @@ def live_realtime(q):
     grade = ("EXCELLENT" if oee >= 85 else "GOOD" if oee >= 75 else "AVERAGE" if oee >= 65 else "POOR")
     working_min = float(row.get("working_minutes") or ((t1 - t0).total_seconds() / 60))
     shift_plan = int(working_min * 60 // ideal)
-    current = CLOCK.at(dt.datetime.now())[:2] == (rd, sh)
+    dummy, held = _dummy_cfg() is not None, _dummy_now() is not None
+    current = CLOCK.at(_now())[:2] == (rd, sh)
+    dummy_status = (_store().status_log(rd, sh) or [{"status": "IDLE"}])[-1]["status"]
     rt = {
         "record_date": rd, "shift_name": sh, "line_name": LINE["line_name"],
         "shift_start_time": row.get("start_time"), "shift_end_time": row.get("end_time"),
-        "operating_status": COLLECTOR.current_status() if current else "IDLE",
+        "operating_status": dummy_status if dummy and current else COLLECTOR.current_status() if current else "IDLE",
         "current_model_number": None, "current_model_name": None,
         "machine_name": cfg.get("machine_name"),
         "ok_count": ok, "ng_count": ng, "shift_plan": shift_plan,
         "cycle_time_plan": ideal, "cycle_time_actual": round(run_s / len(cyc), 2) if cyc else None,
         "availability": round(avail, 2), "performance": round(perf, 2), "quality_oee": round(qual, 2),
-        "overall_oee": round(oee, 2), "oee_grade": grade, "is_shift_completed": dt.datetime.now() >= t1,
+        "overall_oee": round(oee, 2), "oee_grade": grade, "is_shift_completed": _now() >= t1,
         "is_gap_time": False,
         "loss_breakdown_seconds": round(loss.get("breakdown", 0)), "loss_quality_seconds": round(loss.get("quality", 0)),
         "loss_setup_seconds": round(loss.get("setup", 0)), "loss_material_seconds": round(loss.get("material", 0)),
         "loss_others_seconds": round(loss.get("others", 0)), "loss_change_over_seconds": round(loss.get("change_over", 0)),
         "loss_speed_seconds": round(speed_loss),
         "min_ct": min((c["ct"] for c in cyc), default=None), "max_ct": max((c["ct"] for c in cyc), default=None),
-        "collector_status": "running" if COLLECTOR.snapshot().get("state") == "connected" else "stopped",
+        "collector_status": "running" if dummy or COLLECTOR.snapshot().get("state") == "connected" else "stopped",
         "ot_active_shift": None, "ot_plan": None,
         "takt_seconds": ideal, "working_minutes": working_min,
         "planned_takt_seconds": ideal, "energy_per_part": None,
-        "andon_calls": sum(1 for e in STORE.status_log(rd, sh) if e.get("andon")),
+        "andon_calls": sum(1 for e in _store().status_log(rd, sh) if e.get("andon")),
+        "server_now": _now().isoformat(timespec="seconds"), "dummy": held,
     }
     newest = [c["ct"] for c in reversed(cyc)][:20]
     for i, v in enumerate(newest):
@@ -502,7 +633,7 @@ def live_hourly_loss_breakdown(q):
     rd, sh = _live_pick(q)
     ideal = _live_ideal()
     _, _, _, now, w0 = _live_window(rd, sh)
-    cyc = STORE.cycles(rd, sh)
+    cyc = _store().cycles(rd, sh)
     loss_types = _live_loss_types()
     keys = ("loss_breakdown", "loss_quality", "loss_material", "loss_setup", "loss_change_over", "loss_speed", "loss_others")
     slots, tot = [], dict.fromkeys(keys + ("total_loss",), 0)
@@ -566,7 +697,7 @@ def _py_ng():
         try:
             PY_NG_SINCE[0] = dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(DATA, "dashboard_layout.json")))
         except OSError:
-            PY_NG_SINCE[0] = dt.datetime.now()
+            PY_NG_SINCE[0] = _now()
     return ng
 
 
@@ -591,7 +722,7 @@ def live_bypass_episodes(q):
     if not _py_ng():
         return out
     names = {no: f"{name} {bit}" for no, name, bit in DEMO_PY}
-    now = dt.datetime.now()
+    now = _now()
     iso = lambda t: t.isoformat(timespec="seconds")
 
     def add(label, eps):
@@ -633,8 +764,8 @@ def live_ct_histogram(q):
         days = max(1, int((q.get("days") or ["30"])[0]))
     except ValueError:
         days = 30
-    since = (dt.date.today() - dt.timedelta(days=days - 1)).isoformat()
-    cts = [float(c["ct"]) for d, sh, _ in STORE.shift_files() if d >= since for c in STORE.cycles(d, sh)]
+    since = (_now().date() - dt.timedelta(days=days - 1)).isoformat()
+    cts = [float(c["ct"]) for d, sh, _ in _store().shift_files() if d >= since for c in _store().cycles(d, sh)]
     step = 10 if len(cts) < 100 else 5 if len(cts) < 500 else 1          # bucket width in 0.1 s
     buckets = {}
     for ct in cts:
@@ -650,12 +781,12 @@ def live_ct_history(q):
     rd, sh = _live_pick(q)
     return [{"id": c["cycle_seq"], "ts": c["ts"], "record_date": rd, "shift_name": sh, "ct_value": c["ct"],
              "cycle_seq": c["cycle_seq"], "part_code": c.get("part_code"), "is_ng": c["is_ng"]}
-            for c in STORE.cycles(rd, sh)]
+            for c in _store().cycles(rd, sh)]
 
 
 def live_cycle_extremes(q):
     rd, sh = _live_pick(q)
-    cyc = STORE.cycles(rd, sh)
+    cyc = _store().cycles(rd, sh)
     if not cyc:
         return {"min": None, "max": None, "shift": sh, "date": rd}
     pick = lambda c: {"ts": c["ts"], "ct_value": c["ct"], "part_code": c.get("part_code"),
@@ -668,14 +799,14 @@ def live_status_log(q):
     rd, sh = _live_pick(q)
     return [{"ts": e["ts"], "nowMinFrac": e["nowMinFrac"], "status": e["status"], "shift": sh,
              **({"andon": e["andon"]} if e.get("andon") else {})}
-            for e in STORE.status_log(rd, sh)]
+            for e in _store().status_log(rd, sh)]
 
 
 def live_production_history():
     ideal = _live_ideal()
     by_day = {}
-    for d, sh, _ in STORE.shift_files():
-        cyc = STORE.cycles(d, sh)
+    for d, sh, _ in _store().shift_files():
+        cyc = _store().cycles(d, sh)
         row = CLOCK.shift_row(sh) or {}
         e = by_day.setdefault(d, {"record_date": d, "total_actual": 0, "total_plan": 0})
         e["total_actual"] += sum(1 for c in cyc if not c["is_ng"])
@@ -688,10 +819,10 @@ def live_ng_list(q):
     label = (q.get("slot_label") or [""])[0]
     lo, hi = (label.split("-") + [""])[:2] if label and label != "00:00-23:59" else ("", "")
     rows = []
-    for rd, sh, _ in STORE.shift_files():
+    for rd, sh, _ in _store().shift_files():
         if rd != d:
             continue
-        for c in STORE.cycles(rd, sh):
+        for c in _store().cycles(rd, sh):
             hm = c["ts"][11:16]
             if c["is_ng"] and (not lo or (lo <= hm < hi if lo < hi else hm >= lo or hm < hi)):
                 rows.append({"ts": c["ts"], "part_code": c.get("part_code"), "cycle_seq": c["cycle_seq"],
@@ -704,7 +835,7 @@ def live_line():
     line = _load("mgmt/line.json", {"id": LINE_ID, **LINE})
     ideal = _live_ideal()
     return {**line, "id": LIVE_LINE_ID, "ideal_cycle_time": ideal, "planned_takt_time": ideal,
-            "collector_status": "running" if COLLECTOR.snapshot().get("state") == "connected" else "stopped",
+            "collector_status": "running" if _dummy_cfg() or COLLECTOR.snapshot().get("state") == "connected" else "stopped",
             "plc_config": {"id": 1, "line_id": LIVE_LINE_ID, "machine_name": cfg.get("machine_name"),
                            "machine_seq": None, "parent_plc_id": None, "ideal_cycle_time": ideal,
                            "max_allowed_cycle": cfg.get("max_allowed_cycle")}}
@@ -872,6 +1003,12 @@ def collector_view():
     }
 
 
+# Kaizen monthly trend on MANAGEMENT-2 (portrait, above the CT distribution); data/kaizen.json overrides it.
+KAIZEN_DEFAULT = {"title": "Kaizen · monthly", "unit": "Apr-Nov 2026",
+                  "months": [{"month": m, "value": v} for m, v in
+                             zip(("Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"), (5, 3, 6, 4, 7, 3, 5, 6))]}
+
+
 # ---------- HTTP ----------
 CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
           ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".json": "application/json",
@@ -975,6 +1112,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"detail": "No clip for this cycle", "state": "none", "reason": reason}, 404)
         return self._file(full, cache="private, max-age=86400", extra={"X-Clip-Source": "archive", "X-Video-Offset": "0"})
 
+    def _dummy_clip(self, q):
+        if _dummy_now():                      # the prepared shift: clips/dummy/cycle_<seq>.mp4
+            return self._clip("dummy", q)
+        try:
+            full = DUMMY_LIVE.clip_path(int((q.get("cycle_seq") or [""])[0]),
+                                        (q.get("date") or [""])[0], (q.get("shift") or [""])[0])
+        except ValueError:
+            return self._json({"detail": "cycle_seq required"}, 400)
+        if not full:
+            return self._json({"detail": "No clip for this cycle", "state": "none", "reason": "no dummy clip"}, 404)
+        # cycle numbers start again every shift: the browser must not keep a clip across shifts
+        return self._file(full, cache="private, max-age=60", extra={"X-Clip-Source": "archive", "X-Video-Offset": "0"})
+
     def do_GET(self):
         u = urlparse(self.path)
         p, q = u.path.rstrip("/") or "/", parse_qs(u.query)
@@ -1005,7 +1155,7 @@ class Handler(BaseHTTPRequestHandler):
             if tail == "wallboard-summary":
                 return self._json(wallboard_summary())
             if tail in ("cycle-video", "archive-video"):
-                return self._clip("main", q)
+                return self._dummy_clip(q) if _dummy_cfg() else self._clip("main", q)
             if tail == "over-target-history":
                 return self._json(over_target_history(q))
             if tail == "hourly-avg-ct":
@@ -1087,6 +1237,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(collector_view())
         if p == "/api/demo/dashboard-layout":       # MANAGEMENT-2 box sizes + CT axis range (⚙ LAYOUT)
             return self._json(_load("dashboard_layout.json", {}))
+        if p == "/api/demo/kaizen":                  # MANAGEMENT-2 Kaizen monthly trend (portrait)
+            return self._json(_load("kaizen.json", KAIZEN_DEFAULT))
         if p == "/api/demo/cycle-videos":
             return self._json(cycle_videos_view(q))
         if p == "/api/demo/camera/live.mjpg":
@@ -1134,6 +1286,8 @@ class Handler(BaseHTTPRequestHandler):
                 seq = int((q.get("cycle_seq") or [""])[0])
             except ValueError:
                 return self._json({"detail": "cycle_seq required"}, 400)
+            if _dummy_cfg():
+                return self._dummy_clip(q)
             full = CAMERA.clip_path(seq)
             if not full:                     # why: still being saved, failed, or never recorded
                 st = CAMERA.clip_status(seq)
@@ -1284,6 +1438,17 @@ class Handler(BaseHTTPRequestHandler):
                 CAMERA.reload()                   # restart the stream with the new camera settings
             out = {**obj, "password_set": bool(obj.get("password")), "password": ""}
             return self._json(out)
+        if p == "/api/demo/kaizen":
+            months = body.get("months")
+            if not isinstance(months, list) or len(months) > 12 or not all(
+                    isinstance(m, dict) and isinstance(m.get("month"), str) and isinstance(m.get("value"), (int, float))
+                    for m in months):
+                return self._json({"detail": "months: up to 12 of {month, value}"}, 400)
+            obj = {"title": str(body.get("title") or "")[:60], "unit": str(body.get("unit") or "")[:40],
+                   "months": [{"month": m["month"][:12], "value": m["value"]} for m in months]}
+            with LOCK:
+                _save("kaizen.json", obj)
+            return self._json(obj)
         if p == "/api/demo/dashboard-layout":
             if len(json.dumps(body)) > 20000:
                 return self._json({"detail": "Layout too large"}, 400)
@@ -1345,7 +1510,7 @@ if __name__ == "__main__":
           f"ffmpeg: {CAMERA.ffmpeg or 'NOT FOUND (no clips, snapshot preview only)'}", flush=True)
     # Pages and API share one origin, so other PCs need no CORS, only a reachable port (firewall).
     for ip in lan_ips():
-        print(f"Open from another PC on the LAN: http://{ip}:{PORT}/YCA-SS/MANAGEMENT-2", flush=True)
+        print(f"Open from another PC on the LAN: http://{ip}:{PORT}/YSD-SS/MANAGEMENT-2", flush=True)
     atexit.register(CAMERA.stop)              # never leave ffmpeg running after the server
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # stop.sh: exit through atexit
     COLLECTOR.start()

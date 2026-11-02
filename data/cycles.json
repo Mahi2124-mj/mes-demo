@@ -2,7 +2,7 @@
  "source": "YCA-SS (line 12), 2026-10-08 shift A, Final Inspection cycles #1600-#1700 that have a clip (80 of 101), copied read-only from the MES clip archive | DEMO EDIT (user request 9-Oct): ct values changed \u2014 only #1662, #1669, #1683 over target, all others 13.0-14.8 s; real values kept in ct_real; #1683 has no clip",
  "line": {
   "line_id": 12,
-  "line_name": "YCA-SS",
+  "line_name": "YSD-SS",
   "line_code": "YCA-L5"
  },
  "model": {

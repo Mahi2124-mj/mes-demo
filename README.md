@@ -151,6 +151,21 @@ The server PC must be on the machine network (192.168.30.x).
   in the first ~12 minutes of a shift (the 50 cycles must fit before now). ▶ Run demo adds its cycles after the
   set; with "Delete old data first" it deletes every live clip (the set itself in `clips/demo_set/` stays).
 
+**Dummy line — `dummy_set.bat` / `dummy_on.bat` / `dummy_off.bat`** (demo clips on the real clock)
+- Put the OK clips in `..\ok video` (a clip named `ng...` there is an NG clip) and NG clips in `..\ng video`,
+  then run `dummy_set.bat` (target 15.4 s; `--target` to change it). It copies them to `clips/dummy_set/`.
+- MANAGEMENT-2 and SUPERVISOR then run a live dummy line on the real clock: every production shift is filled from
+  its start with back-to-back cycles from those clips (OK clips shuffled; 1 NG in every 30 cycles, 17 OK, 1 NG,
+  12 OK; no cycle in a break, BREAK on the timeline), and the pages show the cycles that have ended by now, so the
+  counts, hourly plan/actual and OEE move like a live line. A cycle's time is its clip's length -0.4..+0.2 s (an
+  OK cycle stays under 15 s; an NG cycle is its clip minus the 2 s before and after). Cycle numbers start at 1
+  every shift. The same shift always gets the same cycles (on every screen, after a restart).
+- `dummy_set.bat --hold --date 2026-11-03 --at 10:00` instead prepares that one shift in `data/dummy/` and holds
+  the clock at that time.
+- The live PLC data in `data/live/` is not touched, and the collector keeps recording meanwhile.
+  `dummy_off.bat` / `dummy_on.bat` switch between the dummy line and the PLC data (`data/dummy/dummy.json`); no
+  server restart is needed, open dashboards change over within seconds.
+
 ## Layout (MANAGEMENT-2)
 ⚙ LAYOUT in the header opens a panel; every change shows at once and is saved on the server
 (`data/dashboard_layout.json`), so every screen shows the same (other screens pick it up within 30 s).

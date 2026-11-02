@@ -15,7 +15,9 @@ import { CameraLive, CollectorLive, LiveModal } from "../components/LivePanels";
 const api = axios.create({ baseURL: "", timeout: 5000 });
 
 // Live demo: the page runs on the real clock (the MANAGEMENT page keeps the recorded shift's pinned clock).
-const demoNow = () => new Date();
+// In dummy mode (realtime.dummy) the server holds its clock at a set moment and the page shows that moment.
+let pinnedNow = null;
+const demoNow = () => (pinnedNow ? new Date(pinnedNow) : new Date());
 api.interceptors.request.use(cfg => {
   const t = sessionStorage.getItem("mes_token");
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
@@ -218,6 +220,38 @@ function histPeakLabel(data) {
 // are coloured green/amber/red by their CT value vs ideal, and the
 // global peak bucket is highlighted in yellow.  Total cycle count +
 // peak label are shown in the top-right corner.
+// Kaizen monthly trend: one bar per month (from April), the value on top, the latest month highlighted.
+function KaizenChart({ data, text, textMut, textSub, border }) {
+  const months = data?.months || [];
+  if (!months.length) return <div style={{flex:1}} />;
+  const max = Math.max(...months.map(m => Number(m.value) || 0), 1);
+  return (
+    <div style={{flex:1, minHeight:0, display:"flex", flexDirection:"column", padding:"6px 10px 4px"}}>
+      <div style={{flex:1, minHeight:0, display:"flex", alignItems:"flex-end", gap:"3%",
+                   borderBottom:`1px solid ${border}`, paddingTop:18}}>
+        {months.map((m, i) => {
+          const last = i === months.length - 1;
+          const v = Number(m.value) || 0;
+          return (
+            <div key={m.month} style={{flex:1, height:`${(v / max) * 100}%`, position:"relative", minWidth:0,
+                 borderRadius:"4px 4px 0 0",
+                 background: last ? "linear-gradient(180deg,#fbbf24,#d97706)" : "linear-gradient(180deg,#34d399,#059669)"}}>
+              <span style={{position:"absolute", bottom:"100%", left:0, right:0, textAlign:"center", marginBottom:2,
+                     fontSize:13, fontWeight:900, color: last ? "#fbbf24" : text}}>{m.value}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{display:"flex", gap:"3%", paddingTop:3}}>
+        {months.map((m, i) => (
+          <span key={m.month} style={{flex:1, textAlign:"center", fontSize:10, fontWeight:800, minWidth:0,
+                 color: i === months.length - 1 ? "#fbbf24" : textSub}}>{m.month}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CtDistributionChart({ data, idealCt, bgDeep, border, text, textMut, textSub, D, chartReady, maxCt }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
@@ -942,6 +976,7 @@ export default function Management2() {
   }, [isPortrait, chartMode]);
 
   const [ctHistogram, setCtHistogram] = useState(null);
+  const [kaizen, setKaizen] = useState(null);
 
   // ── FY selector ──────────────────────────────────────────────
   const curFyStart = (() => {
@@ -1005,7 +1040,7 @@ export default function Management2() {
     api.get(`/api/lines/${lineId}/status-log?date=${recDate}&shift=${encodeURIComponent(shiftName)}`)
       .then(res => {
         const rows   = Array.isArray(res.data) ? res.data : [];
-        const cutoff = Date.now() - 16 * 3600 * 1000;
+        const cutoff = demoNow().getTime() - 16 * 3600 * 1000;
         statusLogRef.current = rows
           .filter(e => e.ts >= cutoff)
           .map(e => ({ ...e, shift: e.shift || shiftName }));
@@ -1041,6 +1076,7 @@ export default function Management2() {
     }
     try {
       const rtRes = await api.get(`/api/lines/${lineId}/realtime`);
+      pinnedNow = rtRes.data?.dummy ? rtRes.data.server_now : null;
       setRt(rtRes.data);
       rtRef.current = rtRes.data;
       setConn(true);
@@ -1625,6 +1661,16 @@ export default function Management2() {
     const t = setInterval(fetchQuad, 30000);
     return () => clearInterval(t);
   }, [isPortrait, lineId, rt?.record_date]);
+
+  // Kaizen monthly trend (portrait, above the CT distribution): data/kaizen.json on the server.
+  useEffect(() => {
+    if (!isPortrait) return;
+    let alive = true;
+    const load = () => api.get("/api/demo/kaizen").then(r => { if (alive) setKaizen(r.data); }).catch(() => {});
+    load();
+    const id = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(id); };
+  }, [isPortrait]);
 
   useEffect(() => {
     if (chartMode !== "histogram" && !isPortrait) return;
@@ -3760,9 +3806,16 @@ export default function Management2() {
                 </div>
               </div>
 
-              {/* ── CT histogram with median (right 40%, same height as the CT graph) ── */}
-              <div style={{...card(),
-                  gridColumn: 2, gridRow: 1,
+              {/* ── right 40%: Kaizen monthly trend (top half) and CT histogram with median (bottom half) ── */}
+              <div style={{gridColumn: 2, gridRow: 1, display:"flex", flexDirection:"column", gap:6, minHeight:0}}>
+              <div style={{...card(), flex:1, display:"flex", flexDirection:"column", minHeight:0, overflow:"hidden"}}>
+                <div style={hdr({padding:"4px 10px"})}>
+                  <span style={lbl9}>{kaizen?.title || "Kaizen · monthly"}</span>
+                  <span style={{fontSize:10,color:textMut,fontWeight:700}}>{kaizen?.unit || ""}</span>
+                </div>
+                <KaizenChart data={kaizen} text={text} textMut={textMut} textSub={textSub} border={border} />
+              </div>
+              <div style={{...card(), flex:1,
                   display:"flex", flexDirection:"column", minHeight:0, overflow:"hidden",
                   position:"relative"}}>
                 <div style={hdr({padding:"4px 10px"})}>
@@ -3786,6 +3839,7 @@ export default function Management2() {
                                         D={D}
                                         chartReady={chartReady && chartLib} />
                 </div>
+              </div>
               </div>
             </div>
             )}
@@ -5648,7 +5702,7 @@ export default function Management2() {
                         // Duration helper "Xm Ys" or "Hh Mm"
                         const fmtDur = (startIso, endIso) => {
                           const start = startIso ? new Date(startIso) : null;
-                          const end   = endIso   ? new Date(endIso)   : new Date();
+                          const end   = endIso   ? new Date(endIso)   : demoNow();
                           if (!start || isNaN(start.getTime())) return "—";
                           const sec = Math.max(0, Math.floor((end - start) / 1000));
                           const h = Math.floor(sec/3600);
@@ -5712,7 +5766,7 @@ export default function Management2() {
                                     const segDur = (() => {
                                       try {
                                         const a = new Date(segFrom);
-                                        const b = segTo ? new Date(segTo) : new Date();
+                                        const b = segTo ? new Date(segTo) : demoNow();
                                         const sec = Math.max(0, Math.floor((b - a)/1000));
                                         const m = Math.floor(sec/60);
                                         const sc = sec % 60;

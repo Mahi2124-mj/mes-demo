@@ -9,6 +9,7 @@ const Management2 = lazy(() => import("./pages/Management2"));
 const MachineConfig = lazy(() => import("./pages/MachineConfig"));
 const CameraConfig = lazy(() => import("./pages/CameraConfig"));
 const CycleVideos = lazy(() => import("./pages/CycleVideos"));
+const Kaizen = lazy(() => import("./pages/Kaizen"));
 
 // Same page shell the MES uses for non-wallboard pages (Layout.jsx): light page + floating SlideNav.
 function Shell({ children }) {
@@ -32,7 +33,8 @@ export default function App() {
             <Route path="/machine-config" element={<Shell><MachineConfig /></Shell>} />
             <Route path="/camera" element={<Shell><CameraConfig /></Shell>} />
             <Route path="/cycle-videos" element={<Shell><CycleVideos /></Shell>} />
-            <Route path="*" element={<Navigate to="/YCA-SS/SUPERVISOR" replace />} />
+            <Route path="/kaizen" element={<Shell><Kaizen /></Shell>} />
+            <Route path="*" element={<Navigate to="/YSD-SS/SUPERVISOR" replace />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

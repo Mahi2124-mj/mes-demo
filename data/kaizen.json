@@ -1,0 +1,38 @@
+{
+ "title": "Kaizen \u00b7 monthly",
+ "unit": "Apr-Nov 2026",
+ "months": [
+  {
+   "month": "Apr",
+   "value": 5
+  },
+  {
+   "month": "May",
+   "value": 3
+  },
+  {
+   "month": "Jun",
+   "value": 6
+  },
+  {
+   "month": "Jul",
+   "value": 4
+  },
+  {
+   "month": "Aug",
+   "value": 7
+  },
+  {
+   "month": "Sep",
+   "value": 3
+  },
+  {
+   "month": "Oct",
+   "value": 5
+  },
+  {
+   "month": "Nov",
+   "value": 2
+  }
+ ]
+}
