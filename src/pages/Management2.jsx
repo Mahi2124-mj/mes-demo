@@ -777,11 +777,17 @@ export default function Management2() {
     typeof window !== "undefined" && window.innerHeight > window.innerWidth);
 
   const needsRotation = isPortrait !== viewportPortrait;
+  // The 9:16 layout is drawn 1080 px wide; on a narrower screen (a turned 16:9 monitor, or a zoomed browser)
+  // it is scaled down to fit instead of cutting its boxes. Phones keep their own scrolling page.
+  const [vpSize, setVpSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  const pw = needsRotation ? vpSize.h : vpSize.w, ph = needsRotation ? vpSize.w : vpSize.h;
+  const pk = isPortrait && pw < 1080 && (needsRotation || pw > 600) ? pw / 1080 : 1;
 
   const prevVpShapeRef = useRef(
     typeof window !== "undefined" && window.innerHeight > window.innerWidth);
   useEffect(() => {
     const onResize = () => {
+      setVpSize({ w: window.innerWidth, h: window.innerHeight });
       const vp = window.innerHeight > window.innerWidth;
       setViewportPortrait(prev => prev === vp ? prev : vp);
       if (prevVpShapeRef.current !== vp) {
@@ -2956,23 +2962,24 @@ export default function Management2() {
       )}
 
       <div style={{
-        height:  needsRotation ? "100vw" : "100vh",
-        width:   needsRotation ? "100vh" : "100%",
+        height:  pk < 1 ? `${ph / pk}px` : needsRotation ? "100vw" : "100vh",
+        width:   pk < 1 ? "1080px" : needsRotation ? "100vh" : "100%",
         display:"grid",
         gridTemplateColumns: isPortrait ? `1fr ${LP.loss_w}px ${LP.side_w}px` : `1fr ${LL.side_w}px`,
         // portrait rows: header, KPI band, CT graph | CT distribution, hourly, timeline, documents
         gridTemplateRows:    isPortrait
           ? `minmax(50px, auto) ${LP.kpi_h}px ${LP.ct_h}fr ${pxOrAuto(LP.hourly_h)} ${LP.timeline_h}fr ${pxOrAuto(LP.docs_h)}`
-          : `minmax(50px, auto) 1fr ${pxOrAuto(LL.timeline_h)} ${pxOrAuto(LL.hourly_h)}`,
+          // never below their content: if the screen is too short (zoomed browser) the page scrolls
+          : `max-content minmax(min-content, 1fr) ${LL.timeline_h ? `${LL.timeline_h}px` : "max-content"} ${LL.hourly_h ? `${LL.hourly_h}px` : "max-content"}`,
         gap:6, padding:6,
         paddingTop: gapShift ? 40 : 6,
         background:bg, color:text,
-        overflow:"hidden",
-        position:    needsRotation ? "fixed" : "static",
-        top:         needsRotation ? 0       : undefined,
-        left:        needsRotation ? "100vw" : undefined,
-        transformOrigin: needsRotation ? "top left" : undefined,
-        transform:   needsRotation ? "rotate(90deg)" : undefined,
+        overflowX:"hidden", overflowY: isPortrait ? "hidden" : "auto",
+        position:    needsRotation || pk < 1 ? "fixed" : "static",
+        top:         needsRotation || pk < 1 ? 0 : undefined,
+        left:        needsRotation ? "100vw" : pk < 1 ? 0 : undefined,
+        transformOrigin: needsRotation || pk < 1 ? "top left" : undefined,
+        transform:   [needsRotation && "rotate(90deg)", pk < 1 && `scale(${pk})`].filter(Boolean).join(" ") || undefined,
       }}>
 
         <div style={{...card(),gridColumn:"1/-1",display:"flex",alignItems:"center",
@@ -3349,7 +3356,8 @@ export default function Management2() {
           ...(isPortrait
             ? { display: "contents" }
             : { display:"flex", flexDirection:"column",
-                gap:6, minHeight:0, overflow:"hidden" }),
+                // min-content: the row grows (and the page scrolls) rather than hide the CT graph
+                gap:6, minHeight:"min-content", overflow:"hidden" }),
         }}>
 
         <div style={{
@@ -3591,7 +3599,9 @@ export default function Management2() {
             ? { display: "contents" }
             : { display: "grid",
                 gridTemplateColumns: `1fr ${LL.loss_w}px`,
-                gap: 6, flex: 1, minHeight: 0 }),
+                // keep room for the CT graph when the KPI cards wrap (small screen or a zoomed browser);
+                // the page then scrolls instead of squeezing the graph to nothing
+                gap: 6, flex: 1, minHeight: 220 }),
         }}>
 
           {isPortrait && (
