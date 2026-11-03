@@ -220,7 +220,7 @@ function histPeakLabel(data) {
 // are coloured green/amber/red by their CT value vs ideal, and the
 // global peak bucket is highlighted in yellow.  Total cycle count +
 // peak label are shown in the top-right corner.
-// Kaizen monthly trend: one bar per month (from April), the value on top, the latest month highlighted.
+// Kaizen monthly trend: one green bar per month (from April), the value on top.
 function KaizenChart({ data, text, textMut, textSub, border }) {
   const months = data?.months || [];
   if (!months.length) return <div style={{flex:1}} />;
@@ -230,22 +230,21 @@ function KaizenChart({ data, text, textMut, textSub, border }) {
       <div style={{flex:1, minHeight:0, display:"flex", alignItems:"flex-end", gap:"3%",
                    borderBottom:`1px solid ${border}`, paddingTop:18}}>
         {months.map((m, i) => {
-          const last = i === months.length - 1;
           const v = Number(m.value) || 0;
           return (
             <div key={m.month} style={{flex:1, height:`${(v / max) * 100}%`, position:"relative", minWidth:0,
                  borderRadius:"4px 4px 0 0",
-                 background: last ? "linear-gradient(180deg,#fbbf24,#d97706)" : "linear-gradient(180deg,#34d399,#059669)"}}>
+                 background: "linear-gradient(180deg,#34d399,#059669)"}}>
               <span style={{position:"absolute", bottom:"100%", left:0, right:0, textAlign:"center", marginBottom:2,
-                     fontSize:13, fontWeight:900, color: last ? "#fbbf24" : text}}>{m.value}</span>
+                     fontSize:13, fontWeight:900, color: text}}>{m.value}</span>
             </div>
           );
         })}
       </div>
       <div style={{display:"flex", gap:"3%", paddingTop:3}}>
-        {months.map((m, i) => (
+        {months.map(m => (
           <span key={m.month} style={{flex:1, textAlign:"center", fontSize:10, fontWeight:800, minWidth:0,
-                 color: i === months.length - 1 ? "#fbbf24" : textSub}}>{m.month}</span>
+                 color: textSub}}>{m.month}</span>
         ))}
       </div>
     </div>
@@ -3820,8 +3819,8 @@ export default function Management2() {
               <div style={{gridColumn: 2, gridRow: 1, display:"flex", flexDirection:"column", gap:6, minHeight:0}}>
               <div style={{...card(), flex:1, display:"flex", flexDirection:"column", minHeight:0, overflow:"hidden"}}>
                 <div style={hdr({padding:"4px 10px"})}>
-                  <span style={lbl9}>{kaizen?.title || "Kaizen · monthly"}</span>
-                  <span style={{fontSize:10,color:textMut,fontWeight:700}}>{kaizen?.unit || ""}</span>
+                  <span style={{...lbl9, fontSize:16, fontWeight:900, color:text}}>{kaizen?.title || "Kaizen · monthly"}</span>
+                  <span style={{fontSize:12,color:textMut,fontWeight:700}}>{kaizen?.unit || ""}</span>
                 </div>
                 <KaizenChart data={kaizen} text={text} textMut={textMut} textSub={textSub} border={border} />
               </div>

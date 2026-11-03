@@ -7,7 +7,7 @@ const API = "/api/demo/kaizen";
 const MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];   // financial year
 
 const C = { card: "#fff", border: "#e2e8f0", text: "#0f172a", sub: "#64748b", mut: "#94a3b8", ok: "#16a34a", ng: "#dc2626",
-            blue: "#1e40af", amber: "#d97706" };
+            blue: "#1e40af" };
 const card = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,.05)" };
 const input = { padding: "8px 10px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, width: "100%", boxSizing: "border-box" };
 const label = { fontSize: 10, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: C.mut, marginBottom: 4, display: "block" };
@@ -83,12 +83,12 @@ export default function Kaizen() {
         <div style={card}>
           <span style={label}>Preview</span>
           <div style={{ height: 220, display: "flex", alignItems: "flex-end", gap: 10, borderBottom: `1px solid ${C.border}`, paddingTop: 22 }}>
-            {shown.map((m, i) => (
+            {shown.map(m => (
               <div key={m} style={{ flex: 1, position: "relative", height: `${(Number(values[m]) || 0) / max * 100}%`,
                    borderRadius: "5px 5px 0 0",
-                   background: i === shown.length - 1 ? "linear-gradient(180deg,#fbbf24,#d97706)" : "linear-gradient(180deg,#34d399,#059669)" }}>
+                   background: "linear-gradient(180deg,#34d399,#059669)" }}>
                 <span style={{ position: "absolute", bottom: "100%", left: 0, right: 0, textAlign: "center", fontWeight: 900,
-                       fontSize: 14, color: i === shown.length - 1 ? C.amber : C.text }}>{values[m]}</span>
+                       fontSize: 14, color: C.text }}>{values[m]}</span>
               </div>
             ))}
           </div>
