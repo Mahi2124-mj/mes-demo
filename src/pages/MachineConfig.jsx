@@ -15,7 +15,7 @@ const API_URL = "/api/demo/machine";
 // Fixed cascade values (selectors are shown locked — one machine only).
 const ZONE_NAME = "Demo";
 const LINE_NAME = "Nut-Runner Demo";
-const DEFAULT_MACHINE_NAME = "Nut-Runner Demo Station";
+const DEFAULT_MACHINE_NAME = "Final Inspection Machine";
 
 const PLC_MODELS = [
   "Mitsubishi FX5U-32MT/ESS",

@@ -26,7 +26,7 @@ export const DEFAULTS = {
   rtsp_path: "/h264/ch1/main/av_stream",    // the station camera's main stream
   username: "admin",
   password: "",
-  assigned_machine: "Nut-Runner Demo Station",
+  assigned_machine: "Final Inspection Machine",
   recording_enabled: true,
   codec: "H.264 Main",
   resolution: "1920 × 1080",
@@ -39,7 +39,7 @@ export const DEFAULTS = {
   post_roll_s: 0,
 };
 
-const MACHINES = ["Nut-Runner Demo Station"];
+const MACHINES = ["Final Inspection Machine"];
 const CODECS = ["H.264 Main", "H.264 High", "H.265"];
 const RESOLUTIONS = ["1280 × 720", "1920 × 1080", "2560 × 1440"];
 

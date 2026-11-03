@@ -56,7 +56,7 @@ SHIFT = CYCLES["shift_name"]
 BY_SUB = {m["sub_id"]: m for m in CYCLES["machines"]}       # 0 = main (Final Inspection)
 
 MACHINE_DEFAULTS = {
-    "machine_name": "Nut-Runner Demo Station", "plc_model": "Mitsubishi FX5U-32MT/ESS",
+    "machine_name": "Final Inspection Machine", "plc_model": "Mitsubishi FX5U-32MT/ESS",
     "plc_ip": "192.168.30.10", "plc_port": 5000, "protocol": "SLMP 3E (binary)", "count_mode": "bit",
     "ok_bit_address": "L108", "ng_bit_address": "L109", "ok_data_register": "D101",
     "ng_data_register": "D102", "shift_reset_bit": "L110", "status_address": "",
@@ -88,7 +88,7 @@ MACHINE_DEFAULTS = {
 CAMERA_DEFAULTS = {
     "camera_id": "CAM-01", "name": "Station camera", "ip": "192.168.30.20", "port": 554,
     "rtsp_path": "/h264/ch1/main/av_stream", "username": "admin", "password": "",
-    "assigned_machine": "Nut-Runner Demo Station", "recording_enabled": True,
+    "assigned_machine": "Final Inspection Machine", "recording_enabled": True,
     "codec": "H.264 Main", "resolution": "1920 × 1080", "fps": 25, "bitrate_kbps": 2000,
     "iframe_interval": 25, "video_save_path": os.path.join(HERE, "clips"),
     "retention_days": 30, "pre_roll_s": 0, "post_roll_s": 0,     # 0/0: clip length = cycle time
