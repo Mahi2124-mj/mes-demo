@@ -1323,8 +1323,10 @@ export default function WallboardLeft() {
     setVideoCycle(null);
   }, []);
   // Dummy mode (wallboard-cycles .dummy): the server holds its clock at a set moment; show that moment.
+  // and otherwise run on the server's wall clock (a panel in another time zone shows plant time).
   const pinnedNowRef = useRef(null);
-  const clockNow = () => (pinnedNowRef.current ? new Date(pinnedNowRef.current) : new Date());
+  const skewRef = useRef(0);
+  const clockNow = () => (pinnedNowRef.current ? new Date(pinnedNowRef.current) : new Date(Date.now() + skewRef.current));
   const [now, setNow]   = useState(new Date());
 
   const _detectOrient = () =>
@@ -1361,7 +1363,11 @@ export default function WallboardLeft() {
     // lineId is null until a NAMED url resolves — don't fire /api/lines/null/…
     if (!lineId) return;
     axios.get(`/api/lines/${lineId}/wallboard-cycles`)
-         .then(r => { pinnedNowRef.current = r.data?.dummy ? r.data.server_now : null; setNow(clockNow()); setData(r.data); })
+         .then(r => {
+           pinnedNowRef.current = r.data?.dummy ? r.data.server_now : null;
+           if (r.data?.server_now) skewRef.current = Date.parse(r.data.server_now) - Date.now();
+           setNow(clockNow()); setData(r.data);
+         })
          .catch(() => {});
   }, [lineId]);
   const fetchSummary = useCallback(() => {

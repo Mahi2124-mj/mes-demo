@@ -16,8 +16,12 @@ const api = axios.create({ baseURL: "", timeout: 5000 });
 
 // Live demo: the page runs on the real clock (the MANAGEMENT page keeps the recorded shift's pinned clock).
 // In dummy mode (realtime.dummy) the server holds its clock at a set moment and the page shows that moment.
+// The page runs on the server's wall clock, not the device's: a panel set to another time zone (or a wrong
+// clock) would otherwise draw the shift timeline, "now" line and hourly slots at the wrong time.
+// server_now is the server's local time without a zone, which JS reads as this device's local time.
 let pinnedNow = null;
-const demoNow = () => (pinnedNow ? new Date(pinnedNow) : new Date());
+let serverSkewMs = 0;
+const demoNow = () => (pinnedNow ? new Date(pinnedNow) : new Date(Date.now() + serverSkewMs));
 api.interceptors.request.use(cfg => {
   const t = sessionStorage.getItem("mes_token");
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
@@ -1082,6 +1086,7 @@ export default function Management2() {
     try {
       const rtRes = await api.get(`/api/lines/${lineId}/realtime`);
       pinnedNow = rtRes.data?.dummy ? rtRes.data.server_now : null;
+      if (rtRes.data?.server_now) serverSkewMs = Date.parse(rtRes.data.server_now) - Date.now();
       setRt(rtRes.data);
       rtRef.current = rtRes.data;
       setConn(true);
