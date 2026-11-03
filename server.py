@@ -416,11 +416,11 @@ def _now():
 class DummyLive:
     """LiveStore look-alike for the live dummy line: each production shift is planned once from the dummy clip
     set (same seed for the same shift, so every screen and every restart sees the same cycles), and only the
-    cycles that have ended by now are returned. Status: RUNNING from the shift start, BREAK in breaks, and one
-    model setup of about 6 minutes (SETUP_AFTER into the shift) with no cycles."""
+    cycles that have ended by now are returned. Status: BREAK in breaks, a model setup of SETUP_S at the shift
+    start (A: 08:30-08:36) with no cycles, RUNNING otherwise."""
 
-    SETUP_AFTER = dt.timedelta(minutes=40)
-    SETUP_S = (330, 390)
+    SETUP_AFTER = dt.timedelta(0)
+    SETUP_S = 360
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -444,7 +444,7 @@ class DummyLive:
                 for b0, b1 in sorted(breaks):          # not inside a break
                     if b0 <= u0 < b1:
                         u0 = b1
-                setup = (u0, u0 + dt.timedelta(seconds=random.Random(rd + sh + "setup").uniform(*self.SETUP_S)))
+                setup = (u0, u0 + dt.timedelta(seconds=self.SETUP_S))
                 planned = dummy_set.plan_live(man["ok"], man["ng"], s0, s1, sorted(breaks + [setup]), rd + sh)
                 rows = []
                 for seq, (clip, ct, is_ng, end) in enumerate(planned, 1):      # cycle numbers 1.. in every shift
@@ -467,7 +467,7 @@ class DummyLive:
         now = dt.datetime.now()
         if s0 is None or now < s0:
             return []
-        ev = [(s0, "RUNNING", 1)]
+        ev = [] if setup and setup[0] == s0 else [(s0, "RUNNING", 1)]   # a setup at the start opens the shift
         for (b0, b1), (st, code) in [(b, ("BREAK", 8)) for b in breaks] + [(setup, ("MODEL_SETUP", 4))]:
             if b0 <= now:
                 ev.append((b0, st, code))
