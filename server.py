@@ -416,11 +416,15 @@ def _now():
 class DummyLive:
     """LiveStore look-alike for the live dummy line: each production shift is planned once from the dummy clip
     set (same seed for the same shift, so every screen and every restart sees the same cycles), and only the
-    cycles that have ended by now are returned. Status: RUNNING from the shift start, BREAK in breaks."""
+    cycles that have ended by now are returned. Status: RUNNING from the shift start, BREAK in breaks, and one
+    model setup of about 6 minutes (SETUP_AFTER into the shift) with no cycles."""
+
+    SETUP_AFTER = dt.timedelta(minutes=40)
+    SETUP_S = (330, 390)
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.plans = {}                       # (rd, sh) -> (ends, rows, shift start, breaks)
+        self.plans = {}                       # (rd, sh) -> (ends, rows, shift start, breaks, setup)
         self.clips = {}                       # (rd, sh, cycle_seq) -> clip path
 
     def _plan(self, rd, sh):
@@ -432,36 +436,41 @@ class DummyLive:
             from demo_set import breaks_of
             row = CLOCK.shift_row(sh)
             man = _load_path(os.path.join(CLIPS, "dummy_set", "manifest.json"), {})
-            plan = ([], [], None, [])
+            plan = ([], [], None, [], None)
             if row and not str(sh).startswith("GAP") and man.get("ok") and man.get("ng"):
                 s0, s1 = CLOCK.bounds(dt.date.fromisoformat(rd), row)
                 breaks = breaks_of(_line_cfg(), CLOCK, rd, sh)
-                planned = dummy_set.plan_live(man["ok"], man["ng"], s0, s1, breaks, rd + sh)
+                u0 = s0 + self.SETUP_AFTER
+                for b0, b1 in sorted(breaks):          # not inside a break
+                    if b0 <= u0 < b1:
+                        u0 = b1
+                setup = (u0, u0 + dt.timedelta(seconds=random.Random(rd + sh + "setup").uniform(*self.SETUP_S)))
+                planned = dummy_set.plan_live(man["ok"], man["ng"], s0, s1, sorted(breaks + [setup]), rd + sh)
                 rows = []
                 for seq, (clip, ct, is_ng, end) in enumerate(planned, 1):      # cycle numbers 1.. in every shift
                     self.clips[(rd, sh, seq)] = os.path.join(CLIPS, "dummy_set", clip["file"])
                     rows.append({"cycle_seq": seq, "ts": end.isoformat(timespec="microseconds"), "ct": ct,
                                  "is_ng": is_ng, "part_code": f"{end:%Y%m%d}-{seq:06d}", "gap": ct,
                                  "excluded": 0.0, "ct_source": "measured"})
-                plan = ([dt.datetime.fromisoformat(r["ts"]) for r in rows], rows, s0, breaks)
+                plan = ([dt.datetime.fromisoformat(r["ts"]) for r in rows], rows, s0, breaks, setup)
             self.plans[(rd, sh)] = plan
             if len(self.plans) > 6:           # keep the last few shifts
                 self.plans.pop(next(iter(self.plans)))
             return plan
 
     def cycles(self, rd, sh):
-        ends, rows, _, _ = self._plan(rd, sh)
+        ends, rows = self._plan(rd, sh)[:2]
         return rows[:bisect.bisect_right(ends, dt.datetime.now())]
 
     def status_log(self, rd, sh):
-        _, _, s0, breaks = self._plan(rd, sh)
+        _, _, s0, breaks, setup = self._plan(rd, sh)
         now = dt.datetime.now()
         if s0 is None or now < s0:
             return []
         ev = [(s0, "RUNNING", 1)]
-        for b0, b1 in breaks:
+        for (b0, b1), (st, code) in [(b, ("BREAK", 8)) for b in breaks] + [(setup, ("MODEL_SETUP", 4))]:
             if b0 <= now:
-                ev.append((b0, "BREAK", 8))
+                ev.append((b0, st, code))
             if b1 <= now:
                 ev.append((b1, "RUNNING", 1))
         return [{"ts": int(t.timestamp() * 1000), "nowMinFrac": min_frac(t), "status": st, "code": code, "shift": sh}
